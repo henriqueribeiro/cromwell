@@ -102,7 +102,6 @@ class AwsBatchInitializationActor(params: AwsBatchInitializationActorParams)
     }
   }
 
-
   override lazy val workflowPaths: Future[AwsBatchWorkflowPaths] = for {
     prov <- provider
   } yield new AwsBatchWorkflowPaths(workflowDescriptor, prov, configuration)
@@ -110,12 +109,11 @@ class AwsBatchInitializationActor(params: AwsBatchInitializationActorParams)
   override lazy val initializationData: Future[AwsBatchBackendInitializationData] = for {
     workflowPaths <- workflowPaths
     prov <- provider
-  } yield AwsBatchBackendInitializationData(
-    workflowPaths = workflowPaths, 
-    runtimeAttributesBuilder = runtimeAttributesBuilder, 
-    configuration = configuration, 
-    provider = prov, 
-    dockerToken = privateDockerUnencryptedToken)
+  } yield AwsBatchBackendInitializationData(workflowPaths,
+  runtimeAttributesBuilder,
+  configuration,
+  prov,
+  dockerToken = privateDockerUnencryptedToken)
 
   override lazy val ioCommandBuilder =  {
     val conf = Option(configuration) match {

@@ -55,7 +55,7 @@ class AwsBatchConfiguration(val configurationDescriptor: BackendConfigurationDes
     case false =>
     PathBuilderFactory
   }
-  
+
   val dockerCredentials = BackendDockerConfiguration.build(configurationDescriptor.backendConfig).dockerCredentials
   val dockerEncryptionKeyName: Option[String] = dockerCredentials flatMap { _.keyName }
   val dockerEncryptionAuthName: Option[String] = dockerCredentials flatMap { _.authName }

@@ -237,11 +237,10 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       buildKVPair("BATCH_FILE_S3_URL",batch_file_s3_url(scriptBucketName,scriptKeyPrefix,scriptKey)))
   }
 
-  
-  private def storePrivateDockerToken(privateDockerToken: Option[String]) = {
+  private def storePrivateDockerToken(token: String) = {
     try {
 
-      val secretName: String = "CROMWELL_DOCKERHUB_CREDENTIALS_2"
+      val secretName: String = "cromwell/credentials/dockerhub"
 
       // Check if secret already exists
       // If exists, update it otherwise create it
@@ -251,7 +250,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       if(secretsNameList.contains(secretName)){
         val secretRequest: UpdateSecretRequest = UpdateSecretRequest.builder()
           .secretId(secretName)
-          .secretString(privateDockerToken.get)
+          .secretString(token)
           .build();
 
         secretsClient.updateSecret(secretRequest);
@@ -260,7 +259,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       } else {
         val secretRequest: CreateSecretRequest = CreateSecretRequest.builder()
           .name(secretName)
-          .secretString(privateDockerToken.get)
+          .secretString(token)
           .build()
 
         secretsClient.createSecret(secretRequest)
@@ -272,7 +271,6 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
         case e: SecretsManagerException => Log.warn(e.awsErrorDetails().errorMessage())
     }
   }
-
 
   def submitJob[F[_]]()( implicit timer: Timer[F], async: Async[F]): Aws[F, SubmitJobResponse] = {
 
@@ -295,7 +293,11 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
        case _  => commandScript
     }
 
-    storePrivateDockerToken(privateDockerToken)
+    privateDockerToken match {
+      case Some(token) => storePrivateDockerToken(token)
+      case None => Log.debug("No docker token was passed")
+    }
+    // storePrivateDockerToken(privateDockerToken)
 
     //calls the client to submit the job
     def callClient(definitionArn: String, awsBatchAttributes: AwsBatchAttributes): Aws[F, SubmitJobResponse] = {
