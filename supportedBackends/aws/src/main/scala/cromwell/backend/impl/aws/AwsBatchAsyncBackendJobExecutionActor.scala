@@ -178,7 +178,8 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       generateAwsBatchOutputs(jobDescriptor),
       jobPaths, Seq.empty[AwsBatchParameter],
       configuration.awsConfig.region,
-      Option(configuration.awsAuth))
+      Option(configuration.awsAuth),
+      configuration.fsxFileSystem)
   }
   /* Tries to abort the job in flight
    *
@@ -260,14 +261,15 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       case (name, files) => inputsFromWomFiles(name, files, files.map(relativeLocalizationPath), jobDescriptor)
     }
 
-    val scriptInput: AwsBatchInput = AwsBatchFileInput(
-      "script",
-      jobPaths.script.pathAsString,
-      DefaultPathBuilder.get(jobPaths.script.pathWithoutScheme),
-      workingDisk
-    )
+    // val scriptInput: AwsBatchInput = AwsBatchFileInput(
+    //   "script",
+    //   jobPaths.script.pathAsString,
+    //   DefaultPathBuilder.get(jobPaths.script.pathWithoutScheme),
+    //   workingDisk
+    // )
 
-    Set(scriptInput) ++ writeFunctionInputs ++ callInputInputs
+    // Set(scriptInput) ++ writeFunctionInputs ++ callInputInputs
+    writeFunctionInputs.toSet ++ callInputInputs
   }
 
   /**

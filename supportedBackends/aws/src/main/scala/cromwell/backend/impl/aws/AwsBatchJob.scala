@@ -82,7 +82,8 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
                              jobPaths: JobPaths, // Based on config, calculated in Job Paths, key to all things outside container
                              parameters: Seq[AwsBatchParameter],
                              configRegion: Option[Region],
-                             optAwsAuthMode: Option[AwsAuthMode] = None
+                             optAwsAuthMode: Option[AwsAuthMode] = None,
+                             fsxFileSystem: Option[List[String]]
                             ) {
 
   // values for container environment
@@ -125,6 +126,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     //working in a mount will cause collisions in long running workers
     val replaced = commandScript.replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
     val insertionPoint = replaced.indexOf("\n", replaced.indexOf("#!")) +1 //just after the new line after the shebang!
+    val s3Regex = "s3://([^/]*)/(.*)".r
 
     /* generate a series of s3 copy statements to copy any s3 files into the container. We randomize the order
        so that large scatters don't all attempt to copy the same thing at the same time. */
@@ -137,9 +139,19 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
            |""".stripMargin
 
 
-      case input: AwsBatchFileInput if input.s3key.startsWith("s3://") =>
-        s"$s3Cmd cp --no-progress ${input.s3key} ${input.mount.mountPoint.pathAsString}/${input.local}"
-          .replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
+      case input: AwsBatchFileInput if input.s3key.startsWith("s3://") => {
+        val s3Regex(bucketName, key) = input.s3key.substring(0, input.s3key.lastIndexOf("/") + 1)
+
+        if(fsxFileSystem.isDefined && fsxFileSystem.get.contains(bucketName)){
+          s"""
+            |mkdir -v -p ${input.mount.mountPoint.pathAsString}/${bucketName}/${key}
+            |cp -v /${input.local.pathAsString} ${input.mount.mountPoint.pathAsString}/${input.local}"""
+            .replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir).stripMargin
+        }else{
+          s"$s3Cmd cp --no-progress ${input.s3key} ${input.mount.mountPoint.pathAsString}/${input.local}"
+            .replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
+        }
+      }
 
       case input: AwsBatchFileInput =>
         //here we don't need a copy command but the centaurTests expect us to verify the existence of the file
@@ -169,7 +181,21 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     val stdOut = dockerStdout.replace("/cromwell_root", workDir)
     val stdErr = dockerStderr.replace("/cromwell_root", workDir)
 
-    //generate a series of s3 commands to delocalize artifacts from the container to storage at the end of the task
+    //generate a series of commands to delocalize artifacts from the container to storage at the end of the task
+    val artifactsCopyCommand = {
+      // rc file
+      val rcCopy = s"if [ -f $workDir/${jobPaths.returnCodeFilename} ]; then $s3Cmd cp --no-progress $workDir/${jobPaths.returnCodeFilename} ${jobPaths.callRoot.pathAsString}/${jobPaths.returnCodeFilename} ; fi"
+
+      // stdErr file
+      val stdErrCopy = s"if [ -f $stdErr ]; then $s3Cmd cp --no-progress $stdErr ${jobPaths.standardPaths.error.pathAsString}; fi"
+
+      // stdOut file
+      val stdOutCopy = s"if [ -f $stdOut ]; then $s3Cmd cp --no-progress $stdOut ${jobPaths.standardPaths.output.pathAsString}; fi"
+
+      List(rcCopy, stdErrCopy, stdOutCopy).mkString("\n")
+    }
+
+    //generate a series of s3 commands to delocalize files from the container to storage at the end of the task
     val outputCopyCommand = outputs.map {
       case output: AwsBatchFileOutput if output.local.pathAsString.contains("*") => "" //filter out globs
       case output: AwsBatchFileOutput if output.name.endsWith(".list") && output.name.contains("glob-") =>
@@ -189,29 +215,45 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
 
       case output: AwsBatchFileOutput if output.s3key.startsWith("s3://") && output.mount.mountPoint.pathAsString == AwsBatchWorkingDisk.MountPoint.pathAsString =>
         //output is on working disk mount
-        s"""
-           |$s3Cmd cp --no-progress $workDir/${output.local.pathAsString} ${output.s3key}
-           |""".stripMargin
+        val s3Regex(bucketName, key) = output.s3key.substring(0, output.s3key.lastIndexOf("/") + 1)
+
+        if(fsxFileSystem.isDefined && fsxFileSystem.get.contains(bucketName)){
+          s"""
+             |mkdir -v -p /${bucketName}/${key}
+             |cp -v $workDir/${output.local.pathAsString} /${bucketName}/${key}/${output.local.toString()}""".stripMargin
+        }else{
+          s"$s3Cmd cp --no-progress $workDir/${output.local.pathAsString} ${output.s3key}"
+        }
       case output: AwsBatchFileOutput =>
         //output on a different mount
-        s"$s3Cmd cp --no-progress ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} ${output.s3key}"
-      case _ => ""
-    }.mkString("\n") + "\n" +
-      s"""
-         |if [ -f $workDir/${jobPaths.returnCodeFilename} ]; then $s3Cmd cp --no-progress $workDir/${jobPaths.returnCodeFilename} ${jobPaths.callRoot.pathAsString}/${jobPaths.returnCodeFilename} ; fi\n
-         |if [ -f $stdErr ]; then $s3Cmd cp --no-progress $stdErr ${jobPaths.standardPaths.error.pathAsString}; fi
-         |if [ -f $stdOut ]; then $s3Cmd cp --no-progress $stdOut ${jobPaths.standardPaths.output.pathAsString}; fi
-         |""".stripMargin
+        val s3Regex(bucketName, key) = output.s3key.substring(0, output.s3key.lastIndexOf("/") + 1)
 
+        if(fsxFileSystem.isDefined && fsxFileSystem.get.contains(bucketName)){
+          s"""
+             |mkdir -v -p /${bucketName}/${key}
+             |cp -v ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} /${bucketName}/${key}/${output.local.toString()}""".stripMargin
+        }else{
+          s"$s3Cmd cp --no-progress ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} ${output.s3key}"
+        }
+      case _ => ""
+    }.mkString("\n") + "\n" + artifactsCopyCommand
+      // s"""
+      //    |if [ -f $workDir/${jobPaths.returnCodeFilename} ]; then $s3Cmd cp --no-progress $workDir/${jobPaths.returnCodeFilename} ${jobPaths.callRoot.pathAsString}/${jobPaths.returnCodeFilename} ; fi\n
+      //    |if [ -f $stdErr ]; then $s3Cmd cp --no-progress $stdErr ${jobPaths.standardPaths.error.pathAsString}; fi
+      //    |if [ -f $stdOut ]; then $s3Cmd cp --no-progress $stdOut ${jobPaths.standardPaths.output.pathAsString}; fi
+      //    |""".stripMargin
 
     //insert the preamble at the insertion point and the postscript copy command at the end
     replaced.patch(insertionPoint, preamble, 0) +
       s"""
+         |
          |{
          |set -e
          |echo '*** DELOCALIZING OUTPUTS ***'
          |$outputCopyCommand
          |echo '*** COMPLETED DELOCALIZATION ***'
+         |echo '*** EXITING WITH RC CODE ***'
+         |exit $$(head -n 1 $workDir/${jobPaths.returnCodeFilename})
          |}
          |""".stripMargin
   }
@@ -367,7 +409,9 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
         jobDescriptor = jobDescriptor,
         jobPaths = jobPaths,
         inputs = inputs,
-        outputs = outputs)
+        outputs = outputs,
+        fsxFileSystem = fsxFileSystem
+        )
 
       val jobDefinitionBuilder = StandardAwsBatchJobDefinitionBuilder
       val jobDefinition = jobDefinitionBuilder.build(jobDefinitionContext)
@@ -397,16 +441,20 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
         // See:
         //
         // http://aws-java-sdk-javadoc.s3-website-us-west-2.amazonaws.com/latest/software/amazon/awssdk/services/batch/model/RegisterJobDefinitionRequest.Builder.html
-        val definitionRequest = RegisterJobDefinitionRequest.builder
+        var definitionRequest = RegisterJobDefinitionRequest.builder
           .containerProperties(jobDefinition.containerProperties)
           .jobDefinitionName(jobDefinitionName)
           // See https://stackoverflow.com/questions/24349517/scala-method-named-type
           .`type`(JobDefinitionType.CONTAINER)
-          .build
+          //.build
+
+        if (jobDefinitionContext.runtimeAttributes.awsBatchRetryAttempts != 0){
+          definitionRequest = definitionRequest.retryStrategy(jobDefinition.retryStrategy)
+        }
 
         Log.debug(s"Submitting definition request: $definitionRequest")
 
-        val response: RegisterJobDefinitionResponse = batchClient.registerJobDefinition(definitionRequest)
+        val response: RegisterJobDefinitionResponse = batchClient.registerJobDefinition(definitionRequest.build)
         Log.info(s"Definition created: $response")
         response.jobDefinitionArn()
       }

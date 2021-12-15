@@ -56,6 +56,7 @@ class AwsBatchConfiguration(val configurationDescriptor: BackendConfigurationDes
     case false =>
     PathBuilderFactory
   }
+  val fsxFileSystem = batchAttributes.fsxFileSystem
 }
 
 object AWSBatchStorageSystems {
