@@ -122,12 +122,20 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     //this is the location of the aws cli mounted into the container by the ec2 launch template
     val s3Cmd = "/usr/local/aws-cli/v2/current/bin/aws s3"
     //internal to the container, therefore not mounted
-    val workDir = "/tmp/scratch"
-    //working in a mount will cause collisions in long running workers
+    // val workDir = "/tmp/scratch"
+
+    val workDir = {
+      if(fsxFileSystem.isDefined){
+        s"/${jobPaths.callRoot.pathWithoutScheme}/tmp"
+      }else{
+        "/tmp/scratch"
+      }
+    }
+
     val replaced = commandScript.replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
     val insertionPoint = replaced.indexOf("\n", replaced.indexOf("#!")) +1 //just after the new line after the shebang!
-    val s3Regex = "s3://([^/]*)/(.*)".r
-
+    // val s3Regex = "s3://([^/]*)/(.*)".r
+    
     /* generate a series of s3 copy statements to copy any s3 files into the container. We randomize the order
        so that large scatters don't all attempt to copy the same thing at the same time. */
     val inputCopyCommand = Random.shuffle(inputs.map {
@@ -140,25 +148,17 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
 
 
       case input: AwsBatchFileInput if input.s3key.startsWith("s3://") => {
-        val s3Regex(bucketName, key) = input.s3key.substring(0, input.s3key.lastIndexOf("/") + 1)
-
-        if(fsxFileSystem.isDefined && fsxFileSystem.get.contains(bucketName)){
-          s"""
-            |mkdir -v -p ${input.mount.mountPoint.pathAsString}/${bucketName}/${key}
-            |cp -v /${input.local.pathAsString} ${input.mount.mountPoint.pathAsString}/${input.local}"""
-            .replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir).stripMargin
-        }else{
-          s"$s3Cmd cp --no-progress ${input.s3key} ${input.mount.mountPoint.pathAsString}/${input.local}"
-            .replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
-        }
+        s"$s3Cmd cp --no-progress ${input.s3key} ${input.mount.mountPoint.pathAsString}/${input.local}"
+          .replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
       }
 
       case input: AwsBatchFileInput =>
         //here we don't need a copy command but the centaurTests expect us to verify the existence of the file
-        val filePath = s"${input.mount.mountPoint.pathAsString}/${input.local.pathAsString}"
-          .replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
+        // val filePath = s"${input.mount.mountPoint.pathAsString}/${input.local.pathAsString}"
+        //   .replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)        
+        val filePath = input.local.pathAsString
 
-        s"test -e $filePath || echo 'input file: $filePath does not exist' && exit 1"
+        s"test -e $filePath || { echo 'input file: $filePath does not exist'; exit 1; }"
 
       case _ => ""
     }.toList).mkString("\n")
@@ -169,7 +169,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |{
          |set -e
          |echo '*** LOCALIZING INPUTS ***'
-         |if [ ! -d $workDir ]; then mkdir $workDir && chmod 777 $workDir; fi
+         |if [ ! -d $workDir ]; then mkdir -p $workDir && chmod 777 $workDir; fi
          |cd $workDir
          |$inputCopyCommand
          |echo '*** COMPLETED LOCALIZATION ***'
@@ -185,12 +185,15 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     val artifactsCopyCommand = {
       // rc file
       val rcCopy = s"if [ -f $workDir/${jobPaths.returnCodeFilename} ]; then $s3Cmd cp --no-progress $workDir/${jobPaths.returnCodeFilename} ${jobPaths.callRoot.pathAsString}/${jobPaths.returnCodeFilename} ; fi"
+      // val rcCopy = s"if [ -f $workDir/${jobPaths.returnCodeFilename} ]; then cp -v $workDir/${jobPaths.returnCodeFilename} ${jobPaths.callRoot.pathAsString}/${jobPaths.returnCodeFilename} ; fi"
 
       // stdErr file
       val stdErrCopy = s"if [ -f $stdErr ]; then $s3Cmd cp --no-progress $stdErr ${jobPaths.standardPaths.error.pathAsString}; fi"
+      // val stdErrCopy = s"if [ -f $stdErr ]; then cp -v $stdErr ${jobPaths.standardPaths.error.pathAsString}; fi"
 
       // stdOut file
       val stdOutCopy = s"if [ -f $stdOut ]; then $s3Cmd cp --no-progress $stdOut ${jobPaths.standardPaths.output.pathAsString}; fi"
+      // val stdOutCopy = s"if [ -f $stdOut ]; then cp -v $stdOut ${jobPaths.standardPaths.output.pathAsString}; fi"
 
       List(rcCopy, stdErrCopy, stdOutCopy).mkString("\n")
     }
@@ -215,34 +218,38 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
 
       case output: AwsBatchFileOutput if output.s3key.startsWith("s3://") && output.mount.mountPoint.pathAsString == AwsBatchWorkingDisk.MountPoint.pathAsString =>
         //output is on working disk mount
-        val s3Regex(bucketName, key) = output.s3key.substring(0, output.s3key.lastIndexOf("/") + 1)
-
-        if(fsxFileSystem.isDefined && fsxFileSystem.get.contains(bucketName)){
-          s"""
-             |mkdir -v -p /${bucketName}/${key}
-             |cp -v $workDir/${output.local.pathAsString} /${bucketName}/${key}/${output.local.toString()}""".stripMargin
+        if(fsxFileSystem.isDefined){
+          s"mv -v $workDir/${output.local.pathAsString} /${jobPaths.callRoot.pathWithoutScheme}/${output.local.toString()}"
         }else{
           s"$s3Cmd cp --no-progress $workDir/${output.local.pathAsString} ${output.s3key}"
         }
       case output: AwsBatchFileOutput =>
         //output on a different mount
-        val s3Regex(bucketName, key) = output.s3key.substring(0, output.s3key.lastIndexOf("/") + 1)
-
-        if(fsxFileSystem.isDefined && fsxFileSystem.get.contains(bucketName)){
-          s"""
-             |mkdir -v -p /${bucketName}/${key}
-             |cp -v ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} /${bucketName}/${key}/${output.local.toString()}""".stripMargin
+        if(fsxFileSystem.isDefined){
+          s"mv -v $workDir/${output.local.pathAsString} /${jobPaths.callRoot.pathWithoutScheme}/${output.local.toString()}"
         }else{
           s"$s3Cmd cp --no-progress ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} ${output.s3key}"
         }
       case _ => ""
     }.mkString("\n") + "\n" + artifactsCopyCommand
-      // s"""
-      //    |if [ -f $workDir/${jobPaths.returnCodeFilename} ]; then $s3Cmd cp --no-progress $workDir/${jobPaths.returnCodeFilename} ${jobPaths.callRoot.pathAsString}/${jobPaths.returnCodeFilename} ; fi\n
-      //    |if [ -f $stdErr ]; then $s3Cmd cp --no-progress $stdErr ${jobPaths.standardPaths.error.pathAsString}; fi
-      //    |if [ -f $stdOut ]; then $s3Cmd cp --no-progress $stdOut ${jobPaths.standardPaths.output.pathAsString}; fi
-      //    |""".stripMargin
 
+    val prepareExitCommand = {
+       if(fsxFileSystem.isDefined){
+         s"mv -v $workDir/${jobPaths.returnCodeFilename} /${jobPaths.callRoot.pathWithoutScheme}/${jobPaths.returnCodeFilename}"
+       }else{
+         ""
+       }
+    }
+
+    val exitCommand = {
+      if(fsxFileSystem.isDefined){
+        s"exit $$(head -n 1 /${jobPaths.callRoot.pathWithoutScheme}/${jobPaths.returnCodeFilename})"
+      }else{
+        s"exit $$(head -n 1 $workDir/${jobPaths.returnCodeFilename})"
+      }
+    }
+
+    // rm -vrf $workDir || true
     //insert the preamble at the insertion point and the postscript copy command at the end
     replaced.patch(insertionPoint, preamble, 0) +
       s"""
@@ -252,8 +259,11 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |echo '*** DELOCALIZING OUTPUTS ***'
          |$outputCopyCommand
          |echo '*** COMPLETED DELOCALIZATION ***'
+         |echo '*** PREPARE FOR EXIT ***'
+         |$prepareExitCommand
+         |echo '*** CLEANING DIRECTORY ***'
          |echo '*** EXITING WITH RC CODE ***'
-         |exit $$(head -n 1 $workDir/${jobPaths.returnCodeFilename})
+         |$exitCommand
          |}
          |""".stripMargin
   }

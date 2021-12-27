@@ -53,8 +53,7 @@ class AwsBatchConfiguration(val configurationDescriptor: BackendConfigurationDes
   }
   val pathBuilderFactory = configurationDescriptor.backendConfig.hasPath("filesystems.s3") match {
     case true => S3PathBuilderFactory(configurationDescriptor.globalConfig, configurationDescriptor.backendConfig)
-    case false =>
-    PathBuilderFactory
+    case false => PathBuilderFactory
   }
   val fsxFileSystem = batchAttributes.fsxFileSystem
 }

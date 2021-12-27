@@ -71,7 +71,7 @@ class AwsBatchInitializationActor(params: AwsBatchInitializationActorParams)
 
   override def beforeAll(): Future[Option[BackendInitializationData]] = {
     configuration.fileSystem match {
-      case AWSBatchStorageSystems.s3  => super.beforeAll
+      case AWSBatchStorageSystems.s3 => super.beforeAll
       case _ => { 
         initializationData map { data =>
           publishWorkflowRoot(data.workflowPaths.workflowRoot.pathAsString)
@@ -102,7 +102,7 @@ class AwsBatchInitializationActor(params: AwsBatchInitializationActorParams)
       case None =>  new  AwsBatchConfiguration(params.configurationDescriptor)
     }
     conf.fileSystem match {
-      case  AWSBatchStorageSystems.s3 =>  S3BatchCommandBuilder
+      case AWSBatchStorageSystems.s3 => S3BatchCommandBuilder
       case _ =>   DefaultIoCommandBuilder
     }
   }

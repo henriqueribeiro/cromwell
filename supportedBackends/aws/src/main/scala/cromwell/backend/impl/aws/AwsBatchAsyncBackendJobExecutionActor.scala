@@ -362,9 +362,17 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   // used by generateAwsBatchOutputs, could potentially move this def within that function
   private def generateAwsBatchSingleFileOutputs(womFile: WomSingleFile): List[AwsBatchFileOutput] = {
     val destination = configuration.fileSystem match {
-      case  AWSBatchStorageSystems.s3 =>  callRootPath.resolve(womFile.value.stripPrefix("/")).pathAsString
+      case AWSBatchStorageSystems.s3 if !configuration.fsxFileSystem.isDefined => {
+        callRootPath.resolve(womFile.value.stripPrefix("/")).pathAsString
+      }
       case _ => DefaultPathBuilder.get(womFile.valueString) match {
-        case p if !p.isAbsolute =>  callRootPath.resolve(womFile.value.stripPrefix("/")).pathAsString
+        case p if !p.isAbsolute => {
+          if (configuration.fsxFileSystem.isDefined){
+            s"/${callRootPath.resolve(womFile.value.stripPrefix("/")).pathWithoutScheme}"
+          }else{
+            callRootPath.resolve(womFile.value.stripPrefix("/")).pathAsString
+          }
+        }
         case p => p.pathAsString
       }
 
@@ -517,8 +525,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
 
   override def mapOutputWomFile(womFile: WomFile): WomFile = {
     val wfile  =  configuration.fileSystem match {
-      case  AWSBatchStorageSystems.s3 =>
-        womFile
+      case AWSBatchStorageSystems.s3 => womFile
       case _ =>
         val hostPath = hostAbsoluteFilePath(jobPaths, womFile.valueString)
         if (!hostPath.exists) throw new FileNotFoundException(s"Could not process output, file not found: ${hostPath.pathAsString}")

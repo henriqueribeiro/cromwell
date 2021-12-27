@@ -176,7 +176,9 @@ object AwsBatchRuntimeAttributes {
       memoryMinValidation(runtimeConfig),
       noAddressValidation(runtimeConfig),
       dockerValidation,
-      queueArnValidation(runtimeConfig)
+      queueArnValidation(runtimeConfig),
+      awsBatchRetryAttemptsValidation(runtimeConfig),
+      ulimitsValidation(runtimeConfig)
     )
 
     configuration.fileSystem match  {

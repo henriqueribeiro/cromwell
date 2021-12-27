@@ -98,14 +98,6 @@ object AwsBatchAttributes {
       deprecatedKeys foreach { key => logger.warn(s"Found deprecated configuration key $key, replaced with ${deprecated.get(key)}") }
     }
 
-    // def parseFSx(backendConfig: Config): Option[Map[String, String]] = {
-    //   val fsxConfig = backendConfig.getConfig("filesystems.fsx")
-    //   fsxConfig.isEmpty() match {
-    //     case true => None
-    //     case false => Some(fsxConfig.root.keySet.asScala.map(key => key -> fsxConfig.getString(key)).toMap)
-    //   }
-    // }
-
     def parseFSx(backendConfig: Config): Option[List[String]] = {
       val fsxConfig = backendConfig.getStringList("filesystems.fsx_lst")
       fsxConfig.isEmpty match {
@@ -119,8 +111,8 @@ object AwsBatchAttributes {
     val executionBucket: ErrorOr[String] = validate { backendConfig.as[String]("root") }
 
     val fileSysStr:ErrorOr[String] =  validate {backendConfig.hasPath("filesystems.s3") match {
-      case true => "s3"
-      case false => "local"
+      case true if false => "s3"
+      case _ => "local"
     }}
 
     val fileSysPath = backendConfig.hasPath("filesystems.s3") match {
@@ -146,32 +138,11 @@ object AwsBatchAttributes {
             case other => throw new IllegalArgumentException(s"Unrecognized caching duplication strategy: $other. Supported strategies are copy and reference. See reference.conf for more details.")
           }
       }
-    
-    // println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!HENRIQUE")
-    // println(backendConfig.hasPath("filesystems.fsx"))
-    // if (backendConfig.hasPath("filesystems.fsx")) {
-    //   val bck = backendConfig.getConfig("filesystems.fsx")
-    //   println(bck.isEmpty())
-    //   println(bck)
-    //   println(bck.root.keySet.asScala.map(key => key -> bck.getString(key)).toMap)
-    // }
-
-    // val fsx: ErrorOr[Option[Map[String,String]]] = validate {backendConfig.hasPath("filesystems.fsx") match {
-    //   case true => parseFSx(backendConfig)
-    //   case false => None
-    // }}
 
     val fsx: ErrorOr[Option[List[String]]] = validate {backendConfig.hasPath("filesystems.fsx_lst") match {
       case true => parseFSx(backendConfig)
       case false => None
     }}
-
-    // def parseFSx(backendConfig: Config): Option[Map[String, String]] = {
-    //   backendConfig.hasPath("filesystems.fsx") match {
-    //     case true => testFSx(backendConfig)
-    //     case false => None
-    //   }
-    // }
 
     (
       fileSysStr,

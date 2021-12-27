@@ -57,7 +57,7 @@ trait AwsBatchJobCachingActorHelper extends StandardCachingActorHelper {
 
   lazy val workingDisk: AwsBatchVolume = runtimeAttributes.disks.find(x => configuration.fileSystem match {
     case AWSBatchStorageSystems.s3 => x.name == AwsBatchWorkingDisk.Name
-    case _ =>  configuration.root.startsWith(x.mountPoint.pathAsString)
+    case _ => configuration.root.startsWith(x.mountPoint.pathAsString)
   }).get
 
 
