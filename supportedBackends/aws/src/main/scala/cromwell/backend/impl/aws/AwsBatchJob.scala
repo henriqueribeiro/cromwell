@@ -390,12 +390,11 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
 
 
       //check if there is already a suitable definition based on the calculated job definition name
-      val jobDefinitionName = jobDefinition.name
 
-      Log.debug(s"Checking for existence of job definition called: $jobDefinitionName")
+      Log.debug(s"Checking for existence of job definition called: ${jobDefinition.name}")
 
       val describeJobDefinitionRequest = DescribeJobDefinitionsRequest.builder()
-        .jobDefinitionName( jobDefinitionName )
+        .jobDefinitionName( jobDefinition.name )
         .status("ACTIVE")
         .build()
 
@@ -403,30 +402,19 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
 
       if ( !describeJobDefinitionResponse.jobDefinitions.isEmpty ) {
         //sort the definitions so that the latest revision is at the head
-        val definitions = describeJobDefinitionResponse.jobDefinitions().asScala.toList.sortWith(_.revision > _.revision)
+        val existingDefinition = describeJobDefinitionResponse.jobDefinitions().asScala.toList.sortWith(_.revision > _.revision).head
 
-        //return the arn of the job
-        definitions.head.jobDefinitionArn()
-      } else {
-        Log.debug(s"No job definition found. Creating job definition: $jobDefinitionName")
-
-        // See:
-        //
-        // http://aws-java-sdk-javadoc.s3-website-us-west-2.amazonaws.com/latest/software/amazon/awssdk/services/batch/model/RegisterJobDefinitionRequest.Builder.html
-        var definitionRequest = RegisterJobDefinitionRequest.builder
-          .containerProperties(jobDefinition.containerProperties)
-          .jobDefinitionName(jobDefinitionName)
-          // See https://stackoverflow.com/questions/24349517/scala-method-named-type
-          .`type`(JobDefinitionType.CONTAINER)
-
-        if (jobDefinitionContext.runtimeAttributes.awsBatchRetryAttempts != 0){
-          definitionRequest = definitionRequest.retryStrategy(jobDefinition.retryStrategy)
+        //TODO test this
+        if (existingDefinition.containerProperties().memory() != null || existingDefinition.containerProperties().vcpus() != null) {
+          Log.warn("the job definition '{}' has deprecated configuration for memory and vCPU and will be replaced", existingDefinition.jobDefinitionName())
+          registerJobDefinition(jobDefinition, jobDefinitionContext).jobDefinitionArn()
+        } else {
+          existingDefinition.jobDefinitionArn()
         }
+      } else {
+        Log.debug(s"No job definition found. Creating job definition: ${jobDefinition.name}")
 
-        Log.debug(s"Submitting definition request: $definitionRequest")
-
-        val response: RegisterJobDefinitionResponse = batchClient.registerJobDefinition(definitionRequest.build)
-        Log.info(s"Definition created: $response")
+        val response: RegisterJobDefinitionResponse = registerJobDefinition(jobDefinition, jobDefinitionContext)
         response.jobDefinitionArn()
       }
     })
@@ -455,6 +443,21 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     }
   }
 
+  def registerJobDefinition(jobDefinition: AwsBatchJobDefinition, jobDefinitionContext: AwsBatchJobDefinitionContext): RegisterJobDefinitionResponse = {
+    // See:
+    //
+    // http://aws-java-sdk-javadoc.s3-website-us-west-2.amazonaws.com/latest/software/amazon/awssdk/services/batch/model/RegisterJobDefinitionRequest.Builder.html
+    var definitionRequest = RegisterJobDefinitionRequest.builder
+      .containerProperties(jobDefinition.containerProperties)
+      .jobDefinitionName(jobDefinition.name)
+      // See https://stackoverflow.com/questions/24349517/scala-method-named-type
+      .`type`(JobDefinitionType.CONTAINER)
+
+    if (jobDefinitionContext.runtimeAttributes.awsBatchRetryAttempts != 0){
+      definitionRequest = definitionRequest.retryStrategy(jobDefinition.retryStrategy)
+    }
+    batchClient.registerJobDefinition(definitionRequest.build)
+  }
 
   /** Gets the status of a job by its Id, converted to a RunStatus
     *
