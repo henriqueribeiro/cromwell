@@ -44,9 +44,8 @@ case class PipelinesApiConfigurationAttributes(project: String,
                                                pipelineTimeout: FiniteDuration,
                                                logFlushPeriod: Option[FiniteDuration],
                                                gcsTransferConfiguration: GcsTransferConfiguration,
-                                               virtualPrivateCloudConfiguration: Option[VirtualPrivateCloudConfiguration],
+                                               virtualPrivateCloudConfiguration: VirtualPrivateCloudConfiguration,
                                                batchRequestTimeoutConfiguration: BatchRequestTimeoutConfiguration,
-                                               allowNoAddress: Boolean,
                                                referenceFileToDiskImageMappingOpt: Option[Map[String, PipelinesApiReferenceFilesDisk]],
                                                dockerImageToCacheDiskImageMappingOpt: Option[Map[String, DockerImageCacheEntry]],
                                                checkpointingInterval: FiniteDuration
@@ -62,7 +61,11 @@ object PipelinesApiConfigurationAttributes
     */
   case class GcsTransferConfiguration(transferAttempts: Int Refined Positive, parallelCompositeUploadThreshold: String)
 
-  final case class VirtualPrivateCloudConfiguration(name: String, subnetwork: Option[String], auth: GoogleAuthMode)
+  final case class VirtualPrivateCloudLabels(network: String, subnetwork: Option[String], auth: GoogleAuthMode)
+  final case class VirtualPrivateCloudLiterals(network: String, subnetwork: Option[String])
+  final case class VirtualPrivateCloudConfiguration(labelsOption: Option[VirtualPrivateCloudLabels],
+                                                    literalsOption: Option[VirtualPrivateCloudLiterals],
+                                                   )
   final case class BatchRequestTimeoutConfiguration(readTimeoutMillis: Option[Int Refined Positive], connectTimeoutMillis: Option[Int Refined Positive])
 
 
@@ -71,7 +74,6 @@ object PipelinesApiConfigurationAttributes
   val GenomicsApiDefaultQps = 1000
   val DefaultGcsTransferAttempts: Refined[Int, Positive] = refineMV[Positive](3)
 
-  val allowNoAddressAttributeKey = "allow-noAddress-attribute"
   val checkpointingIntervalKey = "checkpointing-interval"
 
   private val papiKeys = CommonBackendConfigurationAttributes.commonValidConfigurationAttributeKeys ++ Set(
@@ -103,10 +105,11 @@ object PipelinesApiConfigurationAttributes
     "default-runtime-attributes.preemptible",
     "default-runtime-attributes.zones",
     "virtual-private-cloud",
+    "virtual-private-cloud.network-name",
+    "virtual-private-cloud.subnetwork-name",
     "virtual-private-cloud.network-label-key",
     "virtual-private-cloud.subnetwork-label-key",
     "virtual-private-cloud.auth",
-    allowNoAddressAttributeKey,
     "reference-disk-localization-manifests",
     "docker-image-cache-manifest-file",
     checkpointingIntervalKey
@@ -120,10 +123,14 @@ object PipelinesApiConfigurationAttributes
 
     def vpcErrorMessage(missingKeys: List[String]) = s"Virtual Private Cloud configuration is invalid. Missing keys: `${missingKeys.mkString(",")}`.".invalidNel
 
-    def validateVPCConfig(networkOption: Option[String], subnetworkOption: Option[String], authOption: Option[String]): ErrorOr[Option[VirtualPrivateCloudConfiguration]] = {
-      (networkOption,subnetworkOption, authOption) match {
+    def validateVPCLabelsConfig(networkOption: Option[String],
+                                subnetworkOption: Option[String],
+                                authOption: Option[String],
+                               ): ErrorOr[Option[VirtualPrivateCloudLabels]] = {
+      (networkOption, subnetworkOption, authOption) match {
         case (Some(network), _, Some(auth)) => googleConfig.auth(auth) match {
-          case Valid(validAuth) => Option(VirtualPrivateCloudConfiguration(network, subnetworkOption, validAuth)).validNel
+          case Valid(validAuth) =>
+            Option(VirtualPrivateCloudLabels(network, subnetworkOption, validAuth)).validNel
           case Invalid(error) => s"Auth $auth is not valid for Virtual Private Cloud configuration. Reason: $error" .invalidNel
         }
         case (Some(_), _, None) => vpcErrorMessage(List("auth"))
@@ -131,6 +138,29 @@ object PipelinesApiConfigurationAttributes
         case (None, Some(_), None) => vpcErrorMessage(List("network-label-key", "auth"))
         case (None, None, None) => None.validNel
       }
+    }
+
+    def validateVPCLiteralsConfig(networkNameOption: Option[String],
+                                  subnetworkNameOption: Option[String],
+                                 ): ErrorOr[Option[VirtualPrivateCloudLiterals]] = {
+      (networkNameOption, subnetworkNameOption) match {
+        case (None, Some(_)) => vpcErrorMessage(List("network-name"))
+        case (Some(networkName), _) => Option(VirtualPrivateCloudLiterals(networkName, subnetworkNameOption)).valid
+        case (None, None) => None.valid
+      }
+    }
+
+    def validateVPCConfig(networkNameOption: Option[String],
+                          subnetworkNameOption: Option[String],
+                          networkLabelOption: Option[String],
+                          subnetworkLabelOption: Option[String],
+                          authOption: Option[String],
+                         ): ErrorOr[VirtualPrivateCloudConfiguration] = {
+      val vpcLabelsValidation =
+        validateVPCLabelsConfig(networkLabelOption, subnetworkLabelOption, authOption)
+      val vpcLiteralsValidation =
+        validateVPCLiteralsConfig(networkNameOption, subnetworkNameOption)
+      (vpcLabelsValidation, vpcLiteralsValidation) mapN VirtualPrivateCloudConfiguration
     }
 
     val configKeys = backendConfig.entrySet().asScala.toSet map { entry: java.util.Map.Entry[String, ConfigValue] => entry.getKey }
@@ -152,7 +182,6 @@ object PipelinesApiConfigurationAttributes
     val genomicsAuthName: ErrorOr[String] = validate { backendConfig.as[String]("genomics.auth") }
     val genomicsRestrictMetadataAccess: ErrorOr[Boolean] = validate { backendConfig.as[Option[Boolean]]("genomics.restrict-metadata-access").getOrElse(false) }
     val genomicsEnableFuse: ErrorOr[Boolean] = validate { backendConfig.as[Option[Boolean]]("genomics.enable-fuse").getOrElse(false) }
-    val allowNoAddress: ErrorOr[Boolean] = validate { backendConfig.as[Option[Boolean]](allowNoAddressAttributeKey).getOrElse(true) }
     val gcsFilesystemAuthName: ErrorOr[String] = validate { backendConfig.as[String]("filesystems.gcs.auth") }
     val qpsValidation = validateQps(backendConfig)
     val duplicationStrategy = validate { backendConfig.as[Option[String]]("filesystems.gcs.caching.duplication-strategy").getOrElse("copy") match {
@@ -181,12 +210,18 @@ object PipelinesApiConfigurationAttributes
     val gcsTransferConfiguration: ErrorOr[GcsTransferConfiguration] =
       (localizationAttempts, parallelCompositeUploadThreshold) mapN GcsTransferConfiguration.apply
 
+    val vpcNetworkName: ErrorOr[Option[String]] = validate {
+      backendConfig.getAs[String]("virtual-private-cloud.network-name")
+    }
+    val vpcSubnetworkName: ErrorOr[Option[String]] = validate {
+      backendConfig.getAs[String]("virtual-private-cloud.subnetwork-name")
+    }
     val vpcNetworkLabel: ErrorOr[Option[String]] = validate { backendConfig.getAs[String]("virtual-private-cloud.network-label-key") }
     val vpcSubnetworkLabel: ErrorOr[Option[String]] = validate { backendConfig.getAs[String]("virtual-private-cloud.subnetwork-label-key") }
     val vpcAuth: ErrorOr[Option[String]] = validate { backendConfig.getAs[String]("virtual-private-cloud.auth")}
 
-    val virtualPrivateCloudConfiguration: ErrorOr[Option[VirtualPrivateCloudConfiguration]] = {
-      (vpcNetworkLabel, vpcSubnetworkLabel, vpcAuth) flatMapN  validateVPCConfig
+    val virtualPrivateCloudConfiguration: ErrorOr[VirtualPrivateCloudConfiguration] = {
+      (vpcNetworkName, vpcSubnetworkName, vpcNetworkLabel, vpcSubnetworkLabel, vpcAuth) flatMapN validateVPCConfig
     }
 
     val batchRequestsReadTimeout = readOptionalPositiveMillisecondsIntFromDuration(backendConfig, "batch-requests.timeouts.read")
@@ -214,18 +249,17 @@ object PipelinesApiConfigurationAttributes
                                                        cacheHitDuplicationStrategy: PipelinesCacheHitDuplicationStrategy,
                                                        requestWorkers: Int Refined Positive,
                                                        gcsTransferConfiguration: GcsTransferConfiguration,
-                                                       virtualPrivateCloudConfiguration: Option[VirtualPrivateCloudConfiguration],
+                                                       virtualPrivateCloudConfiguration: VirtualPrivateCloudConfiguration,
                                                        batchRequestTimeoutConfiguration: BatchRequestTimeoutConfiguration,
-                                                       allowNoAddress: Boolean,
                                                        referenceDiskLocalizationManifestFilesOpt: Option[List[ManifestFile]],
                                                        dockerImageCacheManifestFileOpt: Option[ValidFullGcsPath]): ErrorOr[PipelinesApiConfigurationAttributes] =
       (googleConfig.auth(genomicsName), googleConfig.auth(gcsName)) mapN {
         (genomicsAuth, gcsAuth) =>
           val generatedReferenceFilesMappingOpt = referenceDiskLocalizationManifestFilesOpt map {
-            generateReferenceFilesMapping(gcsAuth, _)
+            generateReferenceFilesMapping(genomicsAuth, _)
           }
           val dockerImageToCacheDiskImageMappingOpt = dockerImageCacheManifestFileOpt map {
-            generateDockerImageToDiskImageMapping(gcsAuth, _)
+            generateDockerImageToDiskImageMapping(genomicsAuth, _)
           }
           PipelinesApiConfigurationAttributes(
             project = project,
@@ -245,7 +279,6 @@ object PipelinesApiConfigurationAttributes
             gcsTransferConfiguration = gcsTransferConfiguration,
             virtualPrivateCloudConfiguration = virtualPrivateCloudConfiguration,
             batchRequestTimeoutConfiguration = batchRequestTimeoutConfiguration,
-            allowNoAddress,
             referenceFileToDiskImageMappingOpt = generatedReferenceFilesMappingOpt,
             dockerImageToCacheDiskImageMappingOpt = dockerImageToCacheDiskImageMappingOpt,
             checkpointingInterval = checkpointingInterval
@@ -266,7 +299,6 @@ object PipelinesApiConfigurationAttributes
       gcsTransferConfiguration,
       virtualPrivateCloudConfiguration,
       batchRequestTimeoutConfigurationValidation,
-      allowNoAddress,
       referenceDiskLocalizationManifestFiles,
       dockerImageCacheManifestFile
     ) flatMapN authGoogleConfigForPapiConfigurationAttributes match {

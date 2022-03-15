@@ -94,26 +94,30 @@ object Testing {
   val testSettings = List(
     libraryDependencies ++= testDependencies.map(_ % Test),
     // `test` (or `assembly`) - Run most tests
-    testOptions in Test ++= Seq(TestReportArgs) ++ filterTestArgs,
+    Test / testOptions ++= Seq(TestReportArgs) ++ filterTestArgs,
     // `alltests:test` - Run all tests
-    testOptions in AllTests := (testOptions in Test).value.diff(filterTestArgs),
+    AllTests / testOptions := (Test / testOptions).value.diff(filterTestArgs),
     // Add scalameter as a test framework in the CromwellBenchmarkTest scope
-    testFrameworks in CromwellBenchmarkTest += new TestFramework("org.scalameter.ScalaMeterFramework"),
+    CromwellBenchmarkTest / testFrameworks += new TestFramework("org.scalameter.ScalaMeterFramework"),
     // Don't execute benchmarks in parallel
-    parallelExecution in CromwellBenchmarkTest := false,
-    // Make sure no secrets are commited to git
+    CromwellBenchmarkTest / parallelExecution := false,
+    // Until we move away from Travis do not execute ANY tests in parallel (see also Settings.sharedSettings)
+    Test / parallelExecution := false,
+    // Since parallelExecution is off do not buffer test results
+    Test / logBuffered := false,
+    // Make sure no secrets are committed to git
     minnieKenny := {
       val log = streams.value.log
       val args = spaceDelimited("<arg>").parsed
       minnieKennySingleRunner.runOnce(log, args)
     },
-    test in Test := {
+    Test / test := {
       minnieKenny.toTask("").value
-      (test in Test).value
+      (Test / test).value
     },
   )
 
-  val integrationTestSettings = List(
+  private val integrationTestSettings = List(
     libraryDependencies ++= testDependencies.map(_ % IntegrationTest)
   ) ++ itSettings
 

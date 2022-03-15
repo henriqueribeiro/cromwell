@@ -1,150 +1,145 @@
 package drs.localizer
 
-import java.nio.charset.StandardCharsets
-import java.nio.file.{Files, Path}
-
 import cats.data.NonEmptyList
 import cats.effect.{ExitCode, IO, IOApp}
-import cloud.nio.impl.drs.{DrsConfig, MarthaField}
+import cloud.nio.impl.drs.DrsPathResolver.{FatalRetryDisposition, RegularRetryDisposition}
+import cloud.nio.impl.drs.{AccessUrl, DrsConfig, DrsPathResolver, MarthaField}
+import cloud.nio.spi.{CloudNioBackoff, CloudNioSimpleExponentialBackoff}
 import com.typesafe.scalalogging.StrictLogging
+import drs.localizer.CommandLineParser.AccessTokenStrategy.{Azure, Google}
+import drs.localizer.accesstokens.{AccessTokenStrategy, AzureB2CAccessTokenStrategy, GoogleAccessTokenStrategy}
+import drs.localizer.downloaders.AccessUrlDownloader.Hashes
+import drs.localizer.downloaders._
 
-import scala.sys.process._
+import scala.concurrent.duration._
+import scala.language.postfixOps
 
 object DrsLocalizerMain extends IOApp with StrictLogging {
 
-  /* This assumes the args are as follows:
-      0: DRS input
-      1: download location
-      2: Optional parameter- Requester Pays Billing project ID
-     Martha URL is passed as an environment variable
-   */
   override def run(args: List[String]): IO[ExitCode] = {
-    val argsLength = args.length
+    val parser = buildParser()
 
-    argsLength match {
-      case 2 => new DrsLocalizerMain(args.head, args(1), None).resolveAndDownload()
-      case 3 => new DrsLocalizerMain(args.head, args(1), Option(args(2))).resolveAndDownload()
-      case _ =>
-        val argsList = if (args.nonEmpty) args.mkString(",") else "None"
-        logger.error(s"Received $argsLength arguments. DRS input and download location path is required. Requester Pays billing project ID is optional. " +
-          s"Arguments received: $argsList")
-        IO(ExitCode.Error)
-    }
+    val parsedArgs = parser.parse(args, CommandLineArguments())
+
+    val localize: Option[IO[ExitCode]] = for {
+      pa <- parsedArgs
+      run <- pa.accessTokenStrategy.collect {
+        case Azure => runLocalizer(pa, AzureB2CAccessTokenStrategy(pa))
+        case Google => runLocalizer(pa, GoogleAccessTokenStrategy)
+      }
+    } yield run
+
+    localize getOrElse printUsage
+  }
+
+  def buildParser(): scopt.OptionParser[CommandLineArguments] = new CommandLineParser()
+
+  val defaultBackoff: CloudNioBackoff = CloudNioSimpleExponentialBackoff(
+    initialInterval = 10 seconds, maxInterval = 60 seconds, multiplier = 2)
+
+  val defaultDownloaderFactory: DownloaderFactory = new DownloaderFactory {
+    override def buildAccessUrlDownloader(accessUrl: AccessUrl, downloadLoc: String, hashes: Hashes): IO[Downloader] =
+      IO.pure(AccessUrlDownloader(accessUrl, downloadLoc, hashes))
+
+    override def buildGcsUriDownloader(gcsPath: String, serviceAccountJsonOption: Option[String], downloadLoc: String, requesterPaysProjectOption: Option[String]): IO[Downloader] =
+      IO.pure(GcsUriDownloader(gcsPath, serviceAccountJsonOption, downloadLoc, requesterPaysProjectOption))
+  }
+
+  private def printUsage: IO[ExitCode] = {
+    System.err.println(CommandLineParser.Usage)
+    IO.pure(ExitCode.Error)
+  }
+
+  def runLocalizer(commandLineArguments: CommandLineArguments, accessTokenStrategy: AccessTokenStrategy): IO[ExitCode] = {
+    val drsObject = commandLineArguments.drsObject.get
+    val containerPath = commandLineArguments.containerPath.get
+    new DrsLocalizerMain(drsObject, containerPath, accessTokenStrategy, commandLineArguments.googleRequesterPaysProject).
+      resolveAndDownloadWithRetries(downloadRetries = 3, checksumRetries = 1, defaultDownloaderFactory, Option(defaultBackoff)).map(_.exitCode)
   }
 }
 
 class DrsLocalizerMain(drsUrl: String,
                        downloadLoc: String,
+                       accessTokenStrategy: AccessTokenStrategy,
                        requesterPaysProjectIdOption: Option[String]) extends StrictLogging {
 
-  private final val RequesterPaysErrorMsg = "Bucket is requester pays bucket but no user project provided."
-  private final val ExtractGcsUrlErrorMsg = "No resolved url starting with 'gs://' found from Martha response!"
-
-  def getGcsDrsPathResolver: IO[GcsLocalizerDrsPathResolver] = {
+  def getDrsPathResolver: IO[DrsLocalizerDrsPathResolver] = {
     IO {
       val drsConfig = DrsConfig.fromEnv(sys.env)
-      new GcsLocalizerDrsPathResolver(drsConfig)
+      new DrsLocalizerDrsPathResolver(drsConfig, accessTokenStrategy)
     }
   }
 
+  def resolveAndDownloadWithRetries(downloadRetries: Int,
+                                    checksumRetries: Int,
+                                    downloaderFactory: DownloaderFactory,
+                                    backoff: Option[CloudNioBackoff],
+                                    downloadAttempt: Int = 0,
+                                    checksumAttempt: Int = 0): IO[DownloadResult] = {
 
-  /*
-     Bash to download the GCS file using `gsutil`
-   */
-  def downloadScript(gcsUrl: String, saJsonPathOption: Option[Path]): String = {
-
-    def gcsCopyCommand(flag: String = ""): String = s"gsutil $flag cp $gcsUrl $downloadLoc"
-
-    def setServiceAccount(): String = {
-      saJsonPathOption match {
-        case Some(saJsonPath) =>
-          s"""# Set gsutil to use the service account returned from Martha
-             |gcloud auth activate-service-account --key-file=$saJsonPath > gcloud_output.txt 2>&1
-             |RC_GCLOUD=$$?
-             |if [ "$$RC_GCLOUD" != "0" ]; then
-             |  echo "Failed to activate service account returned from Martha. File won't be downloaded. Error: $$(cat gcloud_output.txt)" >&2
-             |  exit "$$RC_GCLOUD"
-             |else
-             |  echo "Successfully activated service account; Will continue with download. $$(cat gcloud_output.txt)"
-             |fi
-             |""".stripMargin
-        case None => ""
+    def maybeRetryForChecksumFailure(t: Throwable): IO[DownloadResult] = {
+      if (checksumAttempt < checksumRetries) {
+        backoff foreach { b => Thread.sleep(b.backoffMillis) }
+        logger.warn(s"Attempting retry $checksumAttempt of $checksumRetries checksum retries to download $drsUrl", t)
+        // In the event of a checksum failure reset the download attempt to zero.
+        resolveAndDownloadWithRetries(downloadRetries, checksumRetries, downloaderFactory, backoff map { _.next }, 0, checksumAttempt + 1)
+      } else {
+        IO.raiseError(new RuntimeException(s"Exhausted $checksumRetries checksum retries to resolve, download and checksum $drsUrl", t))
       }
     }
 
-    def recoverWithRequesterPays(): String = {
-      requesterPaysProjectIdOption match {
-        case Some(userProject) =>
-          s"""if [ "$$RC_GSUTIL" != "0" ]; then
-             |  # Check if error is requester pays. If yes, retry gsutil copy using project flag
-             |  if grep -q '$RequesterPaysErrorMsg' gsutil_output.txt; then
-             |    echo "Received 'Bucket is requester pays' error. Attempting again using Requester Pays billing project"
-             |    ${gcsCopyCommand(s"-u $userProject")} > gsutil_output.txt 2>&1
-             |    RC_GSUTIL=$$?
-             |  fi
-             |fi""".stripMargin
-        case None => ""
+    def maybeRetryForDownloadFailure(t: Throwable): IO[DownloadResult] = {
+      t match {
+        case _: FatalRetryDisposition =>
+          IO.raiseError(t)
+        case _ if downloadAttempt < downloadRetries =>
+          backoff foreach { b => Thread.sleep(b.backoffMillis) }
+          logger.warn(s"Attempting retry $downloadAttempt of $downloadRetries download retries to download $drsUrl", t)
+          resolveAndDownloadWithRetries(downloadRetries, checksumRetries, downloaderFactory, backoff map { _.next }, downloadAttempt + 1, checksumAttempt)
+        case _ =>
+          IO.raiseError(new RuntimeException(s"Exhausted $downloadRetries download retries to resolve, download and checksum $drsUrl", t))
       }
     }
 
-    // bash to download the GCS file using gsutil
-    s"""set -euo pipefail
-       |set +e
-       |
-       |${setServiceAccount()}
-       |
-       |# Run gsutil copy without using project flag
-       |${gcsCopyCommand()} > gsutil_output.txt 2>&1
-       |RC_GSUTIL=$$?
-       |
-       |${recoverWithRequesterPays()}
-       |
-       |if [ "$$RC_GSUTIL" != "0" ]; then
-       |  echo "Failed to download the file. Error: $$(cat gsutil_output.txt)" >&2
-       |  exit "$$RC_GSUTIL"
-       |else
-       |  echo "Download complete!"
-       |  exit 0
-       |fi""".stripMargin
+    resolveAndDownload(downloaderFactory).redeemWith({
+      maybeRetryForDownloadFailure
+    },
+    {
+      case f: FatalDownloadFailure =>
+        IO.raiseError(new RuntimeException(s"Fatal error downloading DRS object: $f"))
+      case r: RetryableDownloadFailure =>
+        maybeRetryForDownloadFailure(
+          new RuntimeException(s"Retryable download error: $r for $drsUrl on retry attempt $downloadAttempt of $downloadRetries") with RegularRetryDisposition)
+      case ChecksumFailure =>
+        maybeRetryForChecksumFailure(new RuntimeException(s"Checksum failure for $drsUrl on checksum retry attempt $checksumAttempt of $checksumRetries"))
+      case o => IO.pure(o)
+    })
   }
 
-
-  def downloadFileFromGcs(gcsUrl: String, serviceAccountJsonOption: Option[String]) : IO[ExitCode] = {
-
-    logger.info(s"Requester Pays project ID is $requesterPaysProjectIdOption")
-    logger.info(s"Attempting to download $gcsUrl to $downloadLoc")
-
-    val copyProcess = serviceAccountJsonOption match {
-      case Some(sa) =>
-        // if Martha returned a SA, use that SA for gsutil instead of default credentials
-        val tempCredentialDir: Path = Files.createTempDirectory("gcloudTemp_").toAbsolutePath
-        val saJsonPath: Path = tempCredentialDir.resolve("sa.json")
-        Files.write(saJsonPath, sa.getBytes(StandardCharsets.UTF_8))
-        val extraEnv = Map("CLOUDSDK_CONFIG" -> tempCredentialDir.toString)
-        val copyCommand = Seq("bash", "-c", downloadScript(gcsUrl, Option(saJsonPath)))
-        Process(copyCommand, None, extraEnv.toSeq: _*)
-      case None =>
-        // No SA returned from Martha. gsutil will use the application default credentials.
-        val copyCommand = Seq("bash", "-c", downloadScript(gcsUrl, None))
-        Process(copyCommand)
-    }
-
-    // run the multiple bash script to download file and log stream sent to stdout and stderr using ProcessLogger
-    val returnCode = copyProcess ! ProcessLogger(logger.underlying.info, logger.underlying.error)
-
-    IO(ExitCode(returnCode))
+  private [localizer] def resolveAndDownload(downloaderFactory: DownloaderFactory): IO[DownloadResult] = {
+    resolve(downloaderFactory) flatMap { _.download }
   }
 
-
-  def resolveAndDownload(): IO[ExitCode] = {
-    val fields = NonEmptyList.of(MarthaField.GsUri, MarthaField.GoogleServiceAccount)
+  private [localizer] def resolve(downloaderFactory: DownloaderFactory): IO[Downloader] = {
+    val fields = NonEmptyList.of(MarthaField.GsUri, MarthaField.GoogleServiceAccount, MarthaField.AccessUrl, MarthaField.Hashes)
     for {
-      localizerGcsDrsPathResolver <- getGcsDrsPathResolver
-      marthaResponse <- localizerGcsDrsPathResolver.resolveDrsThroughMartha(drsUrl, fields)
-      // Currently Martha only supports resolving DRS paths to GCS paths
-      gcsUrl <- IO.fromEither(marthaResponse.gsUri.toRight(new RuntimeException(ExtractGcsUrlErrorMsg)))
-      serviceAccountJsonOption = marthaResponse.googleServiceAccount.map(_.data.spaces2)
-      exitState <- downloadFileFromGcs(gcsUrl, serviceAccountJsonOption)
-    } yield exitState
+      resolver <- getDrsPathResolver
+      marthaResponse <- resolver.resolveDrsThroughMartha(drsUrl, fields)
+
+      // Currently Martha only supports resolving DRS paths to access URLs or GCS paths.
+      downloader <- (marthaResponse.accessUrl, marthaResponse.gsUri) match {
+        case (Some(accessUrl), _) =>
+          downloaderFactory.buildAccessUrlDownloader(accessUrl, downloadLoc, marthaResponse.hashes)
+        case (_, Some(gcsPath)) =>
+          val serviceAccountJsonOption = marthaResponse.googleServiceAccount.map(_.data.spaces2)
+          downloaderFactory.buildGcsUriDownloader(
+            gcsPath = gcsPath,
+            serviceAccountJsonOption = serviceAccountJsonOption,
+            downloadLoc = downloadLoc,
+            requesterPaysProjectOption = requesterPaysProjectIdOption)
+        case _ =>
+          IO.raiseError(new RuntimeException(DrsPathResolver.ExtractUriErrorMsg))
+      }
+    } yield downloader
   }
 }

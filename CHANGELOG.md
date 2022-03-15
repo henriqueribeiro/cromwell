@@ -1,5 +1,181 @@
 # Cromwell Change Log
 
+## 75 Release Notes
+
+### New `AwaitingCloudQuota` backend status
+
+For Cloud Life Sciences v2beta only.
+
+When a user's GCP project reaches a quota limit, Cromwell continues to submit jobs and Life Sciences acknowledges them as created even if the physical VM cannot yet start. Cromwell now detects this condition in the backend and reports `AwaitingCloudQuota`.
+
+The status is informational and does not require any action. Users wishing to maximize throughput can use `AwaitingCloudQuota` as an indication they should check quota in Cloud Console and request a quota increase from GCP.
+
+`AwaitingCloudQuota` will appear between the `Initializing` and `Running` backend statuses, and will be skipped if not applicable.
+
+Now:
+
+| Status in metadata |Quota normal| Quota delay          | Status meaning                                    |
+|--------------------|----|----------------------|---------------------------------------------------|
+| `executionStatus`    |`Running`| `Running`            | Job state Cromwell is requesting from the backend |
+| `backendStatus`      |`Running`| `AwaitingCloudQuota` | Job state reported by backend                          |
+
+Previously:
+
+| Status in metadata |Quota normal|Quota delay| Status meaning                                            |
+|--------------------|----|----|-----------------------------------------------------------|
+| `executionStatus`    |`Running`|`Running`| Job state Cromwell is requesting from the backend |
+| `backendStatus`      |`Running`|`Running`| Job state reported by backend |
+
+### New 'requestedWorkflowId' API Option
+
+Allows users to choose their own workflow IDs at workflow submission time. 
+
+If supplied for single workflows, this value must be a JSON string containing a valid, and not already used, UUID. For batch submissions, this value must be a JSON array of valid UUIDs.
+
+If not supplied, the behavior is as today: Cromwell will generate a random workflow ID for every workflow submitted. 
+
+### Bug Fixes
+
+* Fixed a bug on Google Pipelines API backends where missing optional output files (`File?`) were not correctly detected by Cromwell and caused invalid call cache entries to be written.
+
+## 73 Release Notes
+
+### Workflow Restart Performance Improvements
+
+Cromwell now allows for improved performance restarting large workflows through the use of a separate rate limiter for restart checks than the rate limiter used for starting new jobs.
+The restart check rate limiter is pre-configured in Cromwell's bundled [reference.conf](https://github.com/broadinstitute/cromwell/blob/develop/core/src/main/resources/reference.conf); see the `job-restart-check-rate-control` stanza in that file for explanations of the various parameters if adjustments are desired.
+
+## 71 Release Notes
+
+### Bug Fixes
+
+* Fixed an issue handling data in Google Cloud Storage buckets with requester pays enabled that could sometimes cause I/O to fail.
+
+## 70 Release Notes
+
+### CWL security fix [#6510](https://github.com/broadinstitute/cromwell/pull/6510)
+
+Fixed an issue that could allow submission of an untrusted CWL file to initiate remote code execution. The vector was improper deserialization of the YAML source file.
+
+CWL execution is enabled by default unless a `CWL` [stanza](https://github.com/broadinstitute/cromwell/blob/develop/core/src/main/resources/reference.conf#L460-L482) is present in the configuration that specifies `enabled: false`. Cromwell instances with CWL disabled were not affected. Consequently, users who wish to mitigate the vulnerability without upgrading Cromwell may do so via this config change.
+
+- Thank you to [Bruno P. Kinoshita](https://github.com/kinow) who first found the issue in a different CWL project ([CVE-2021-41110](https://github.com/common-workflow-language/cwlviewer/security/advisories/GHSA-7g7j-f5g3-fqp7)) and [Michael R. Crusoe](https://github.com/mr-c) who suggested we investigate ours.
+
+## 68 Release Notes
+
+### Virtual Private Cloud
+
+Previous Cromwell versions allowed PAPIV2 jobs to run on a specific subnetwork inside a private network by adding the
+information to Google Cloud project labels.
+
+Cromwell now allows PAPIV2 jobs to run on a specific subnetwork inside a private network by adding the network and
+subnetwork name directly inside the `virtual-private-cloud` backend configuration. More info
+[here](https://cromwell.readthedocs.io/en/stable/backends/Google/).
+
+## 67 Release Notes
+
+### Configuration updates for improved scaling
+
+Some configuration changes were introduced in Cromwell 67 to support improved scaling. See Cromwell's `reference.conf` for details on new parameters.
+
+* I/O throttling moved from `io` to its own `io.throttle` stanza; config updates may be required if these values are currently being overridden in local deployments.
+
+* The default `system.job-rate-control` has been changed from 50 per second to 20 per 10 seconds.
+
+* New configuration parameters have been introduced for values which were previously hardcoded constants:
+  * `system.file-hash-batch-size`, value updated from `100` to `50`.
+  * `io.gcs.max-batch-size`, value stays the same at `100`.
+  * `io.gcs.max-batch-duration`, value stays the same at `5 seconds`.
+
+* New configuration parameters which should not require updating:
+  * `io.command-backpressure-staleness`
+  * `io.backpressure-extension-log-threshold`
+  * `load-control.io-normal-window-minimum`
+  * `load-control.io-normal-window-maximum`
+
+* `io.nio.parallelism` was previously misspelled in `reference.conf` but not in Cromwell's configuration reading code. Only correct spellings of this configuration key had or will have effect.
+
+## 66 Release Notes
+
+### Google Artifact Registry Support
+Cromwell now supports call caching when using Docker images hosted on
+[Google Artifact Registry](https://cloud.google.com/artifact-registry).
+
+### Google Image Repository Hashing Updates
+The previously documented `docker.hash-lookup.gcr` configuration has been renamed to `docker.hash-lookup.google` and
+now applies to both Google Container Registry (GCR) and Google Artifact Registry (GAR) repositories.
+Support for the `docker.hash-lookup.gcr-api-queries-per-100-seconds` configuration key has been formally discontinued
+and a bug preventing correct handling of `docker.hash-lookup...throttle` configuration has been fixed.
+Please see Cromwell's bundled
+[`reference.conf`](https://github.com/broadinstitute/cromwell/blob/develop/core/src/main/resources/reference.conf)
+for more details.
+
+## 65 Release Notes
+
+* An additional set of metrics relating to metadata age were added.
+
+### AMD Rome support on PAPI v2
+On the PAPI v2 backends "AMD Rome" is now supported as a CPU platform. More details can be found
+[here](https://cromwell.readthedocs.io/en/develop/RuntimeAttributes/#cpuplatform).
+
+## 64 Release Notes
+
+### Intel Cascade Lake support on PAPI v2
+
+On the PAPI v2 backends "Intel Cascade Lake" is now supported as a CPU platform. More details can be found
+[here](https://cromwell.readthedocs.io/en/develop/RuntimeAttributes/#cpuplatform).
+
+## 63 Release Notes
+
+### Removed refresh token authentication mode
+
+Google Pipelines API v1 supported authentication with refresh tokens, while v2 of the API does not.
+
+Now that v1 has been discontinued and shut down, this version of Cromwell removes support for refresh tokens.
+
+## 62 Release Notes
+
+### Downloading Access URLs
+
+Added experimental support to download data during Google [Cloud Life Sciences](https://cloud.google.com/life-sciences)
+jobs using [DRS
+AccessURLs](https://ga4gh.github.io/data-repository-service-schemas/preview/release/drs-1.1.0/docs/#_accessurl).
+
+## 61 Release Notes
+
+### No labels update for Archived workflows
+
+If **- and ONLY if -** you have metadata archiving turned on, then for a workflow whose metadata has been archived by Cromwell 
+according to the lifecycle policy, Cromwell will no longer add new labels or update existing labels for this workflow 
+coming through PATCH `/labels` endpoint.
+
+## 60 Release Notes
+
+### Java 11
+
+As of this version, a distribution of Java 11 is required to run Cromwell. Cromwell is developed, tested, and
+containerized using [AdoptOpenJDK 11 HotSpot](https://adoptopenjdk.net/).
+
+### Hybrid metadata storage ("carboniting") removed
+
+Carboniting functionality has been removed from Cromwell. 
+There will be no effect for customers who store metadata permanently in the relational database (most common),
+and there will also be no effect for customers who use the in-memory database.
+
+Breaking change only for customers who explicitly enabled `carbonite-metadata-service` in their configuration to split
+metadata storage between a relational database and Google Cloud Storage. If you had previously enabled carboniting and 
+deletion, any workflows marked as `ArchivedAndPurged` in your database will no longer be accessible via the Cromwell metadata API.
+
+## 59 Release Notes
+
+### Bug Fixes
+
+* Fixed a pair of bugs that could cause workflows to fail unexpectedly with the errors "413 Request Entity Too Large"
+  and "java.net.SocketTimeoutException: Read timed out" when accessing Google Cloud Storage.
+
+## 58 Release Notes
+
+Internal CI-related changes only.
 
 ## 57 Release Notes
 
@@ -1122,7 +1298,7 @@ data. When switching connection information for an existing database containing 
 should be manually replicated from one database instance to another using the tools appropriate for your specific
 database types. Cromwell will not move any existing data automatically. This feature should be considered experimental
 and likely to change in the future. See the [Database Documentation](https://cromwell.readthedocs.io/en/develop/Configuring/#database) or the `database` section in
-[cromwell.examples.conf](https://github.com/broadinstitute/cromwell/blob/develop/cromwell.examples.conf) for more
+[cromwell.examples.conf](https://www.github.com/broadinstitute/cromwell/tree/develop/cromwell.example.backends/cromwell.examples.conf) for more
 information.
 
 * **StatsD**  

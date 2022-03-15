@@ -1,7 +1,7 @@
 package wom.util
 
 import java.io.StringReader
-
+import java.util
 import com.typesafe.config.ConfigException.BadValue
 import com.typesafe.config.{Config, ConfigFactory}
 import eu.timepit.refined.api.Refined
@@ -11,9 +11,10 @@ import io.circe.{Json, ParsingFailure}
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 import org.yaml.snakeyaml.LoaderOptions
+import org.yaml.snakeyaml.comments.CommentLine
 import org.yaml.snakeyaml.composer.Composer
-import org.yaml.snakeyaml.constructor.Constructor
-import org.yaml.snakeyaml.nodes.Node
+import org.yaml.snakeyaml.constructor.SafeConstructor
+import org.yaml.snakeyaml.nodes.{MappingNode, Node, NodeTuple}
 import org.yaml.snakeyaml.parser.ParserImpl
 import org.yaml.snakeyaml.reader.StreamReader
 import org.yaml.snakeyaml.resolver.Resolver
@@ -37,7 +38,7 @@ object YamlUtils {
             maxDepth: Int Refined NonNegative = defaultMaxDepth
            ): Either[ParsingFailure, Json] = {
     try {
-      val yamlConstructor = new Constructor()
+      val yamlConstructor = new SafeConstructor()
       val yamlComposer = new MaxDepthComposer(yaml, maxDepth)
       yamlConstructor.setComposer(yamlComposer)
       val parsed = yamlConstructor.getSingleData(classOf[AnyRef])
@@ -64,12 +65,6 @@ object YamlUtils {
     }
   }
 
-  private lazy val composerRecursiveNodesField = {
-    val field = classOf[Composer].getDeclaredField("recursiveNodes")
-    field.setAccessible(true)
-    field
-  }
-
   private val yamlConfig = ConfigFactory.load().getConfig("yaml")
   private val defaultMaxNodes = yamlConfig.as[Int Refined NonNegative]("max-nodes")
   private val defaultMaxDepth = yamlConfig.as[Int Refined NonNegative]("max-depth")
@@ -91,37 +86,45 @@ object YamlUtils {
       loaderOptions
     ) {
 
-    private lazy val composerRecursiveFields: java.util.Set[Node] = getRecursiveNodeSet(this)
+    private val depth = new Counter
 
-    private def checkDepth(): Unit = {
-      if (composerRecursiveFields.size > maxDepth.value)
+    private def checkDepth[A](f: => A): A = {
+      depth.count += 1
+      if (depth.count > maxDepth.value)
         throw new IllegalArgumentException(s"Parsing halted at node depth $maxDepth")
+      val result = f
+      depth.count -= 1
+      result
     }
 
-    override def composeScalarNode(anchor: String): Node = {
-      checkDepth()
-      super.composeScalarNode(anchor)
+    override def composeScalarNode(anchor: String, blockComments: util.List[CommentLine]): Node = {
+      checkDepth(super.composeScalarNode(anchor, blockComments))
     }
 
     override def composeSequenceNode(anchor: String): Node = {
-      checkDepth()
-      super.composeSequenceNode(anchor)
+      checkDepth(super.composeSequenceNode(anchor))
     }
 
     override def composeMappingNode(anchor: String): Node = {
-      checkDepth()
-      super.composeMappingNode(anchor)
+      checkDepth(super.composeMappingNode(anchor))
+    }
+
+    override def composeMappingChildren(children: util.List[NodeTuple], node: MappingNode): Unit = {
+      checkDepth(super.composeMappingChildren(children, node))
+    }
+
+    override def composeKeyNode(node: MappingNode): Node = {
+      checkDepth(super.composeKeyNode(node))
+    }
+
+    override def composeValueNode(node: MappingNode): Node = {
+      checkDepth(super.composeValueNode(node))
     }
   }
 
   /** A "pointer" reference to a mutable count. */
   private class Counter {
     var count = 0L
-  }
-
-  /** Use reflection to access the existing but private Set of nested nodes */
-  private def getRecursiveNodeSet(composer: Composer): java.util.Set[Node] = {
-    composerRecursiveNodesField.get(composer).asInstanceOf[java.util.Set[Node]]
   }
 
   /**

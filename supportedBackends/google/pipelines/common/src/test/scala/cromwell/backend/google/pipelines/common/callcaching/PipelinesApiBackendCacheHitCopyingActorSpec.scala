@@ -5,6 +5,7 @@ import akka.testkit.{ImplicitSender, TestFSMRef, TestProbe}
 import com.typesafe.config.ConfigFactory
 import cromwell.backend.BackendCacheHitCopyingActor.{CopyOutputsCommand, CopyingOutputsFailedResponse}
 import cromwell.backend.BackendJobExecutionActor.JobSucceededResponse
+import cromwell.backend.google.pipelines.common.PipelinesApiConfigurationAttributes._
 import cromwell.backend.google.pipelines.common._
 import cromwell.backend.io.JobPaths
 import cromwell.backend.standard.StandardValidatedRuntimeAttributesBuilder
@@ -419,9 +420,8 @@ class PipelinesApiBackendCacheHitCopyingActorSpec extends TestKitSuite
       pipelineTimeout = null,
       logFlushPeriod = None,
       gcsTransferConfiguration = null,
-      virtualPrivateCloudConfiguration = None,
+      virtualPrivateCloudConfiguration = VirtualPrivateCloudConfiguration(None, None),
       batchRequestTimeoutConfiguration = null,
-      allowNoAddress = true,
       referenceFileToDiskImageMappingOpt = None,
       dockerImageToCacheDiskImageMappingOpt = None,
       checkpointingInterval = 10.minutes

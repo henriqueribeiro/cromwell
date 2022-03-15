@@ -1,8 +1,5 @@
 package cromwell.engine.io
 
-import java.io.IOException
-import java.net.{SocketException, SocketTimeoutException}
-
 import akka.stream.ActorMaterializer
 import akka.testkit.{ImplicitSender, TestActorRef, TestProbe}
 import better.files.File.OpenOptions
@@ -12,42 +9,48 @@ import cromwell.core.io.DefaultIoCommand._
 import cromwell.core.io.IoContentAsStringCommand.IoReadOptions
 import cromwell.core.io._
 import cromwell.core.path.{DefaultPathBuilder, Path}
-import cromwell.engine.io.gcs.GcsBatchFlow.BatchFailedException
+import cromwell.engine.io.IoActor.IoConfig
+import cromwell.engine.io.IoActorSpec.IoActorConfig
+import cromwell.engine.io.gcs.GcsBatchFlow.{BatchFailedException, GcsBatchFlowConfig}
+import cromwell.engine.io.nio.ChecksumFailedException
+import cromwell.engine.io.nio.NioFlow.NioFlowConfig
 import org.scalatest.flatspec.AnyFlatSpecLike
 import org.scalatest.matchers.should.Matchers
 
+import java.io.IOException
+import java.net.{SocketException, SocketTimeoutException}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
 class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with ImplicitSender {
   behavior of "IoActor"
-  
+
   implicit val ec: ExecutionContext = system.dispatcher
   implicit val materializer: ActorMaterializer = ActorMaterializer()
-  
+
   override def afterAll(): Unit = {
     materializer.shutdown()
     super.afterAll()
   }
-  
+
   it should "copy a file" in {
     val testActor = TestActorRef(
-      factory = new IoActor(1, 10, 10, None, TestProbe("serviceRegistryActorCopy").ref, "cromwell test"),
+      factory = new IoActor(IoActorConfig, TestProbe("serviceRegistryActorCopy").ref, "cromwell test"),
       name = "testActorCopy",
     )
-    
+
     val src = DefaultPathBuilder.createTempFile()
     val dst: Path = src.parent.resolve(src.name + "-dst")
-    
+
     val copyCommand = DefaultIoCopyCommand(src, dst)
-    
+
     testActor ! copyCommand
     expectMsgPF(5 seconds) {
       case response: IoSuccess[_] => response.command.isInstanceOf[IoCopyCommand] shouldBe true
       case response: IoFailure[_] => fail("Expected an IoSuccess", response.failure)
     }
-    
+
     dst.toFile should exist
     src.delete()
     dst.delete()
@@ -55,7 +58,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
 
   it should "write to a file" in {
     val testActor = TestActorRef(
-      factory = new IoActor(1, 10, 10, None, TestProbe("serviceRegistryActorWrite").ref, "cromwell test"),
+      factory = new IoActor(IoActorConfig, TestProbe("serviceRegistryActorWrite").ref, "cromwell test"),
       name = "testActorWrite",
     )
 
@@ -75,7 +78,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
 
   it should "delete a file" in {
     val testActor = TestActorRef(
-      factory = new IoActor(1, 10, 10, None, TestProbe("serviceRegistryActorDelete").ref, "cromwell test"),
+      factory = new IoActor(IoActorConfig, TestProbe("serviceRegistryActorDelete").ref, "cromwell test"),
       name = "testActorDelete",
     )
 
@@ -94,7 +97,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
 
   it should "read a file" in {
     val testActor = TestActorRef(
-      factory = new IoActor(1, 10, 10, None, TestProbe("serviceRegistryActorRead").ref, "cromwell test"),
+      factory = new IoActor(IoActorConfig, TestProbe("serviceRegistryActorRead").ref, "cromwell test"),
       name = "testActorRead",
     )
 
@@ -105,7 +108,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
 
     testActor ! readCommand
     expectMsgPF(5 seconds) {
-      case response: IoSuccess[_] => 
+      case response: IoSuccess[_] =>
         response.command.isInstanceOf[IoContentAsStringCommand] shouldBe true
         response.result.asInstanceOf[String] shouldBe "hello"
       case response: IoFailure[_] => fail("Expected an IoSuccess", response.failure)
@@ -116,7 +119,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
 
   it should "read only the first bytes of file" in {
     val testActor = TestActorRef(
-      factory = new IoActor(1, 10, 10, None, TestProbe("serviceRegistryActorFirstBytes").ref, "cromwell test"),
+      factory = new IoActor(IoActorConfig, TestProbe("serviceRegistryActorFirstBytes").ref, "cromwell test"),
       name = "testActorFirstBytes",
     )
 
@@ -138,7 +141,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
 
   it should "read the file if it's under the byte limit" in {
     val testActor = TestActorRef(
-      factory = new IoActor(1, 10, 10, None, TestProbe("serviceRegistryActorByteLimit").ref, "cromwell test"),
+      factory = new IoActor(IoActorConfig, TestProbe("serviceRegistryActorByteLimit").ref, "cromwell test"),
       name = "testActorByteLimit",
     )
 
@@ -160,7 +163,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
 
   it should "fail if the file is larger than the read limit" in {
     val testActor = TestActorRef(
-      factory = new IoActor(1, 10, 10, None, TestProbe("serviceRegistryActorReadLimit").ref, "cromwell test"),
+      factory = new IoActor(IoActorConfig, TestProbe("serviceRegistryActorReadLimit").ref, "cromwell test"),
       name = "testActorReadLimit",
     )
 
@@ -180,7 +183,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
 
   it should "return a file size" in {
     val testActor = TestActorRef(
-      factory = new IoActor(1, 10, 10, None, TestProbe("serviceRegistryActorSize").ref, "cromwell test"),
+      factory = new IoActor(IoActorConfig, TestProbe("serviceRegistryActorSize").ref, "cromwell test"),
       name = "testActorSize",
     )
 
@@ -202,7 +205,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
 
   it should "return a file md5 hash (local)" in {
     val testActor = TestActorRef(
-      factory = new IoActor(1, 10, 10, None, TestProbe("serviceRegistryActorHash").ref, "cromwell test"),
+      factory = new IoActor(IoActorConfig, TestProbe("serviceRegistryActorHash").ref, "cromwell test"),
       name = "testActorHash",
     )
 
@@ -224,7 +227,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
 
   it should "touch a file (local)" in {
     val testActor = TestActorRef(
-      factory = new IoActor(1, 10, 10, None, TestProbe("serviceRegistryActorTouch").ref, "cromwell test"),
+      factory = new IoActor(IoActorConfig, TestProbe("serviceRegistryActorTouch").ref, "cromwell test"),
       name = "testActorTouch",
     )
 
@@ -251,6 +254,7 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
       new StorageException(408, "message"),
       new StorageException(429, "message"),
       BatchFailedException(new Exception),
+      ChecksumFailedException("message"),
       new SocketException(),
       new SocketTimeoutException(),
       new IOException("text Error getting access token for service account some other text"),
@@ -271,7 +275,9 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
       new IOException("Some other text. Could not read from gs://fc-secure-<snip>/JointGenotyping/<snip>/call-HardFilterAndMakeSitesOnlyVcf/shard-4688/rc: 504 Gateway Timeout"),
     )
 
-    retryables foreach { RetryableRequestSupport.isRetryable(_) shouldBe true }
+    retryables foreach { e => withClue(e) {
+      RetryableRequestSupport.isRetryable(e) shouldBe true }
+    }
   }
 
   it should "have correct non-retryable exceptions" in {
@@ -296,5 +302,26 @@ class IoActorSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with I
     RetryableRequestSupport.isRetryable(nullCause) shouldBe false
     RetryableRequestSupport.isRetryable(nullMessage) shouldBe false
 
+  }
+}
+
+object IoActorSpec {
+  val IoActorConfig: IoConfig = {
+    val gcsConfig: GcsBatchFlowConfig =
+      GcsBatchFlowConfig(parallelism = 10, maxBatchSize = 100, maxBatchDuration = 5 seconds)
+
+    val nioConfig: NioFlowConfig = NioFlowConfig(parallelism = 10)
+
+    IoConfig(
+      queueSize = 10000,
+      numberOfAttempts = 5,
+      commandBackpressureStaleness = 5 seconds,
+      backPressureExtensionLogThreshold = 1 second,
+      ioNormalWindowMinimum = 20 seconds,
+      ioNormalWindowMaximum = 60 seconds,
+      nio = nioConfig,
+      gcsBatch = gcsConfig,
+      throttle = None
+    )
   }
 }

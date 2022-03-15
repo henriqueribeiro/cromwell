@@ -83,10 +83,9 @@ object PipelinesApiRequestFactory {
                                       privateDockerKeyAndEncryptedToken: Option[CreatePipelineDockerKeyAndToken],
                                       womOutputRuntimeExtractor: Option[WomOutputRuntimeExtractor],
                                       adjustedSizeDisks: Seq[PipelinesApiAttachedDisk],
-                                      virtualPrivateCloudConfiguration: Option[VirtualPrivateCloudConfiguration],
+                                      virtualPrivateCloudConfiguration: VirtualPrivateCloudConfiguration,
                                       retryWithMoreMemoryKeys: Option[List[String]],
                                       fuseEnabled: Boolean,
-                                      allowNoAddress: Boolean,
                                       referenceDisksForLocalizationOpt: Option[List[PipelinesApiAttachedDisk]],
                                       monitoringImage: MonitoringImage,
                                       checkpointingConfiguration: CheckpointingConfiguration,
@@ -98,8 +97,5 @@ object PipelinesApiRequestFactory {
     def inputParameters = inputOutputParameters.fileInputParameters
     def outputParameters = inputOutputParameters.fileOutputParameters
     def allParameters = inputParameters ++ outputParameters
-
-    // Takes into account the 'noAddress' runtime attribute and the allowNoAddress configuration option:
-    def effectiveNoAddressValue: Boolean = allowNoAddress && runtimeAttributes.noAddress
   }
 }

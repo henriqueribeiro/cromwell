@@ -129,7 +129,7 @@ class WorkflowStoreActorSpec extends CromwellTestKitWordSpec with CoordinatedWor
       storeActor ! BatchSubmitWorkflows(NonEmptyList.of(helloWorldSourceFiles, helloWorldSourceFiles, helloCwlWorldSourceFiles))
       val insertedIds = expectMsgType[WorkflowsBatchSubmittedToStore](10 seconds).workflowIds.toList
 
-      storeActor ! FetchRunnableWorkflows(2)
+      storeActor ! FetchRunnableWorkflows(2, Set.empty)
       expectMsgPF(10 seconds) {
         case NewWorkflowsToStart(workflowNel) =>
           workflowNel.toList.size shouldBe 2
@@ -142,7 +142,7 @@ class WorkflowStoreActorSpec extends CromwellTestKitWordSpec with CoordinatedWor
           }
       }
 
-      storeActor ! FetchRunnableWorkflows(1)
+      storeActor ! FetchRunnableWorkflows(1, Set.empty)
       expectMsgPF(10 seconds) {
         case NewWorkflowsToStart(workflowNel) =>
           workflowNel.toList.size shouldBe 1
@@ -182,7 +182,7 @@ class WorkflowStoreActorSpec extends CromwellTestKitWordSpec with CoordinatedWor
       storeActor ! BatchSubmitWorkflows(NonEmptyList.of(optionedSourceFiles))
       val insertedIds = expectMsgType[WorkflowsBatchSubmittedToStore](10 seconds).workflowIds.toList
 
-      storeActor ! FetchRunnableWorkflows(1)
+      storeActor ! FetchRunnableWorkflows(1, Set.empty)
       expectMsgPF(10 seconds) {
         case NewWorkflowsToStart(workflowNel) =>
           workflowNel.toList.size should be(1)
@@ -195,12 +195,6 @@ class WorkflowStoreActorSpec extends CromwellTestKitWordSpec with CoordinatedWor
               state should be(Submitted)
 
               import spray.json._
-
-              val encryptedJsObject = sources.workflowOptions.jsObject
-              encryptedJsObject.fields.keys should contain theSameElementsAs Seq("key", "refresh_token")
-              encryptedJsObject.fields("key") should be(JsString("value"))
-              encryptedJsObject.fields("refresh_token").asJsObject.fields.keys should contain theSameElementsAs
-                Seq("iv", "ciphertext")
 
               // We need to wait for workflow metadata to be flushed before we can successfully query for it
               eventually(timeout(15.seconds.dilated), interval(500.millis.dilated)) {
@@ -215,9 +209,7 @@ class WorkflowStoreActorSpec extends CromwellTestKitWordSpec with CoordinatedWor
                   case MetadataLookupResponse(_, eventList) =>
                     val optionsEvent = eventList.find(_.key.key == "submittedFiles:options").get
                     val clearedJsObject = optionsEvent.value.get.value.parseJson.asJsObject
-                    clearedJsObject.fields.keys should contain theSameElementsAs Seq("key", "refresh_token")
                     clearedJsObject.fields("key") should be(JsString("value"))
-                    clearedJsObject.fields("refresh_token") should be(JsString("cleared"))
                 }
               }
           }
@@ -240,7 +232,7 @@ class WorkflowStoreActorSpec extends CromwellTestKitWordSpec with CoordinatedWor
       storeActor ! BatchSubmitWorkflows(NonEmptyList.of(helloWorldSourceFiles, helloWorldSourceFiles, helloWorldSourceFiles))
       val insertedIds = expectMsgType[WorkflowsBatchSubmittedToStore](10 seconds).workflowIds.toList
 
-      storeActor ! FetchRunnableWorkflows(100)
+      storeActor ! FetchRunnableWorkflows(100, Set.empty)
       expectMsgPF(10 seconds) {
         case NewWorkflowsToStart(workflowNel) =>
           workflowNel.toList.size shouldBe 3
@@ -268,7 +260,7 @@ class WorkflowStoreActorSpec extends CromwellTestKitWordSpec with CoordinatedWor
         "WorkflowStoreActor-RemainResponsiveForUnknown"
       )
 
-      storeActor ! FetchRunnableWorkflows(100)
+      storeActor ! FetchRunnableWorkflows(100, Set.empty)
       expectMsgPF(10 seconds) {
         case NoNewWorkflowsToStart => // Great
         case x => fail(s"Unexpected response from supposedly empty WorkflowStore: $x")

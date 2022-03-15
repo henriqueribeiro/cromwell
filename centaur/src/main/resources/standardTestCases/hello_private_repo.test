@@ -1,0 +1,20 @@
+name: hello_private_repo
+testFormat: runtwiceexpectingcallcaching
+backends: [LocalDockerSecure]
+
+# CROM-6807 Don't retry failures, subsequent runs will fail because of unexpected cache hits from the initial run
+retryTestFailures: false
+
+files {
+  workflow: hello_private_repo/hello_private_repo.wdl
+  inputs: hello_private_repo/hello_private_repo.inputs.json
+  options: common_options/cache_read_off_write_on.options
+  second-options: common_options/cache_read_on_write_on.options
+}
+
+metadata {
+  workflowName: hello_private_repo
+  status: Succeeded
+  "calls.hello_private_repo.hello.callCaching.result": "Cache Hit: <<CACHE_HIT_UUID>>:hello_private_repo.hello:-1"
+}
+

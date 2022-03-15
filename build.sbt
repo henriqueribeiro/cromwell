@@ -188,17 +188,6 @@ lazy val services = project
   .dependsOn(ftpFileSystem % "test->test")
   .dependsOn(common % "test->test")
 
-lazy val hybridCarboniteMetadataService = project
-  .withLibrarySettings("hybrid-carbonite-metadata-service", hybridCarboniteMetadataServiceDependencies)
-  .dependsOn(services)
-  .dependsOn(engine)
-  .dependsOn(core % "test->test")
-  .dependsOn(services % "test->test")
-  .dependsOn(ftpFileSystem % "test->test")
-  .dependsOn(httpFileSystem % "test->test")
-  .dependsOn(common % "test->test")
-
-
 lazy val backendRoot = Path("supportedBackends")
 
 lazy val backend = project
@@ -219,13 +208,6 @@ lazy val googlePipelinesCommon = (project in backendRoot / "google" / "pipelines
   .dependsOn(services % "test->test")
   .dependsOn(common % "test->test")
 
-lazy val googlePipelinesV1Alpha2 = (project in backendRoot / "google" / "pipelines" / "v1alpha2")
-  .withLibrarySettings("cromwell-pipelines-v1-backend")
-  .dependsOn(googlePipelinesCommon)
-  .dependsOn(googlePipelinesCommon % "test->test")
-  .dependsOn(core % "test->test")
-  .dependsOn(common % "test->test")
-
 lazy val googlePipelinesV2Alpha1 = (project in backendRoot / "google" / "pipelines" / "v2alpha1")
   .withLibrarySettings("cromwell-pipelines-v2-alpha1-backend")
   .dependsOn(googlePipelinesCommon)
@@ -238,12 +220,6 @@ lazy val googlePipelinesV2Beta = (project in backendRoot / "google" / "pipelines
   .dependsOn(googlePipelinesCommon)
   .dependsOn(googlePipelinesCommon % "test->test")
   .dependsOn(core % "test->test")
-  .dependsOn(common % "test->test")
-
-// Legacy, inherits all its code from googlePipelinesV1Alpha2
-lazy val jesBackend = (project in backendRoot / "jes")
-  .withLibrarySettings("cromwell-jes-backend")
-  .dependsOn(googlePipelinesV1Alpha2)
   .dependsOn(common % "test->test")
 
 lazy val awsBackend = (project in backendRoot / "aws")
@@ -268,6 +244,7 @@ lazy val tesBackend = (project in backendRoot / "tes")
   .withLibrarySettings("cromwell-tes-backend", tesBackendDependencies)
   .dependsOn(sfsBackend)
   .dependsOn(ftpFileSystem)
+  .dependsOn(drsFileSystem)
   .dependsOn(backend % "test->test")
   .dependsOn(common % "test->test")
 
@@ -397,10 +374,6 @@ lazy val `cloud-nio-impl-drs` = (project in cloudNio / "cloud-nio-impl-drs")
   .dependsOn(common)
   .dependsOn(common % "test->test")
 
-lazy val statsDProxy = (project in Path("scripts") / "perf" / "statsd-proxy")
-  .withExecutableSettings("statsd-proxy", dependencies = statsDProxyDependencies, pushDocker = false)
-  .dependsOn(common % "test->test")
-
 lazy val perf = project
   .withExecutableSettings("perf", dependencies = perfDependencies, pushDocker = false)
   .dependsOn(common)
@@ -409,16 +382,14 @@ lazy val perf = project
 lazy val `cromwell-drs-localizer` = project
   .withExecutableSettings("cromwell-drs-localizer", drsLocalizerDependencies, drsLocalizerSettings)
   .dependsOn(`cloud-nio-impl-drs`)
-  .dependsOn(common % "test->test")
+  .dependsOn(common)
   .dependsOn(`cloud-nio-impl-drs` % "test->test")
 
 lazy val server = project
   .withExecutableSettings("cromwell", serverDependencies)
   .dependsOn(engine)
-  .dependsOn(googlePipelinesV1Alpha2)
   .dependsOn(googlePipelinesV2Alpha1)
   .dependsOn(googlePipelinesV2Beta)
-  .dependsOn(jesBackend)
   .dependsOn(bcsBackend)
   .dependsOn(awsBackend)
   .dependsOn(tesBackend)
@@ -427,7 +398,6 @@ lazy val server = project
   .dependsOn(wdlDraft3LanguageFactory)
   .dependsOn(wdlBiscayneLanguageFactory)
   .dependsOn(cwlV1_0LanguageFactory)
-  .dependsOn(hybridCarboniteMetadataService)
   .dependsOn(engine % "test->test")
   .dependsOn(common % "test->test")
 
@@ -460,11 +430,9 @@ lazy val root = (project in file("."))
   .aggregate(ftpFileSystem)
   .aggregate(gcsFileSystem)
   .aggregate(googlePipelinesCommon)
-  .aggregate(googlePipelinesV1Alpha2)
   .aggregate(googlePipelinesV2Alpha1)
   .aggregate(googlePipelinesV2Beta)
   .aggregate(httpFileSystem)
-  .aggregate(jesBackend)
   .aggregate(languageFactoryCore)
   .aggregate(ossFileSystem)
   .aggregate(perf)
@@ -472,7 +440,6 @@ lazy val root = (project in file("."))
   .aggregate(services)
   .aggregate(sfsBackend)
   .aggregate(sraFileSystem)
-  .aggregate(statsDProxy)
   .aggregate(tesBackend)
   .aggregate(wdlBiscayneLanguageFactory)
   .aggregate(wdlDraft2LanguageFactory)
@@ -489,5 +456,4 @@ lazy val root = (project in file("."))
   .aggregate(wes2cromwell)
   .aggregate(wom)
   .aggregate(womtool)
-  .aggregate(hybridCarboniteMetadataService)
   .withAggregateSettings()

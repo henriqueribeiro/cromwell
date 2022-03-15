@@ -75,14 +75,12 @@ class MetadataServiceActorSpec extends ServicesSpec {
     ("query1", query1, s"""{
                           |  "key1": "value2",
                           |  "calls": {},
-                          |  "id": "$workflowId",
-                          |  "metadataSource": "Unarchived"
+                          |  "id": "$workflowId"
                           |}""".stripMargin),
     ("query2", query2, s"""{
                           |  "key2": "value1",
                           |  "calls": {},
-                          |  "id": "$workflowId",
-                          |  "metadataSource": "Unarchived"
+                          |  "id": "$workflowId"
                           |}""".stripMargin),
     ("query3", query3, s"""{
                           |  "calls": {
@@ -92,8 +90,7 @@ class MetadataServiceActorSpec extends ServicesSpec {
                           |      "shardIndex": -1
                           |    }]
                           |  },
-                          |  "id": "$workflowId",
-                          |  "metadataSource": "Unarchived"
+                          |  "id": "$workflowId"
                           |}""".stripMargin),
     ("query4", query4, s"""{
                           |  "key1": "value2",
@@ -105,8 +102,7 @@ class MetadataServiceActorSpec extends ServicesSpec {
                           |      "shardIndex": -1
                           |    }]
                           |  },
-                          |  "id": "$workflowId",
-                          |  "metadataSource": "Unarchived"
+                          |  "id": "$workflowId"
                           |}""".stripMargin),
     ("query5", query5, s"""{
                           |  "calls": {
@@ -116,13 +112,18 @@ class MetadataServiceActorSpec extends ServicesSpec {
                           |      "shardIndex": -1
                           |    }]
                           |  },
-                          |  "id": "$workflowId",
-                          |  "metadataSource": "Unarchived"
+                          |  "id": "$workflowId"
                           |}""".stripMargin),
 
   )
 
   actorName should {
+
+    "receive a response to query1 with more time for the system to start up" in {
+      eventually(Timeout(30.seconds), Interval(2.seconds)) {
+        Await.result((actor ? GetMetadataAction(query1)).mapTo[SuccessfulMetadataJsonResponse], 1.seconds)
+      }
+    }
 
     testCases foreach { case (name, query, expectation) =>
 

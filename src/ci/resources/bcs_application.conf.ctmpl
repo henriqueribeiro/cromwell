@@ -1,7 +1,7 @@
 include required(classpath("application.conf"))
 include "build_application.inc.conf"
 
-{{with $cromwellBcs := vault (printf "secret/dsde/cromwell/common/cromwell-bcs")}}
+{{with $cromwellBcs := secret (printf "secret/dsde/cromwell/common/cromwell-bcs")}}
 backend {
   default = "BCS"
 
@@ -60,6 +60,9 @@ backend {
           workerPath: ${user.dir}/supportedBackends/bcs/src/main/scala/cromwell/backend/impl/bcs/worker.tar.gz
         }
       }
+
+      # Have the engine authenticate to docker.io. See BT-141 for more info.
+      include "dockerhub_provider_config_v1.inc.conf"
     }
   }
 }

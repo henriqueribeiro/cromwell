@@ -17,7 +17,6 @@ authentication schemes that might be used:
 * `application_default` (default, recommended) - Use [application default](https://developers.google.com/identity/protocols/application-default-credentials) credentials.
 * `service_account` - Use a specific service account and key file (in PEM format) to authenticate.
 * `user_account` - Authenticate as a user.
-* `refresh_token` - Authenticate each individual workflow using a refresh token supplied in the workflow options.
 * `user_service_account` - Authenticate each individual workflow using service account credentials supplied in the workflow options.
 
 The `auths` block in the `google` stanza defines the authentication schemes within a Cromwell deployment:
@@ -29,12 +28,6 @@ google {
     {
       name = "application-default"
       scheme = "application_default"
-    },
-    {
-      name = "user-via-refresh"
-      scheme = "refresh_token"
-      client-id = "secret_id"
-      client-secret = "secret_secret"
     },
     {
       name = "service-account"
@@ -91,12 +84,6 @@ Most importantly, the value of the `client_email` field should go into the `serv
 `private_key` portion needs to be pulled into its own file (e.g. `my-key.pem`).  The `\n`s in the string need to be converted to newline characters.
 
 While technically not part of Service Account authentication mode, one can also override the default service account that the compute VM is started with via the configuration option `JES.config.genomics.compute-service-account` or through the workflow options parameter `google_compute_service_account`.  The service account you provide must have been granted Service Account Actor role to Cromwell's primary service account. As this only affects Google Pipelines API and not GCS, it's important that this service account, and the service account specified in `JES.config.genomics.auth` can both read/write the location specified by `JES.config.root`
-
-**Refresh Token**
-
-A **refresh_token** field must be specified in the [Workflow Options](../wf_options/Google.md) when submitting the job.  Omitting this field will cause the workflow to fail.
-
-The refresh token is passed to Google along with the `client-id` and `client-secret` pair specified in the corresponding entry in `auths`.
 
 **User Service Account**
 
@@ -324,25 +311,69 @@ This filesystem has two required configuration options:
 
 ### Virtual Private Network
 
-To run your jobs in a private network add the `virtual-private-cloud` stanza in the `config` stanza of the PAPI v2 backend:
+Cromwell can arrange for jobs to run in specific GCP private networks via the `config.virtual-private-cloud` stanza of a PAPI v2 backend.
+There are two ways of specifying private networks:
 
-```
+* [Literal network and subnetwork values](#virtual-private-network-via-literals) that will apply to all projects
+* [Google project labels](#virtual-private-network-via-labels) whose values in a particular Google project will specify the network and subnetwork
+
+#### Virtual Private Network via Literals
+
+```hocon
 backend {
   ...
   providers {
-  	...
-  	PapiV2 {
-  	  actor-factory = "cromwell.backend.google.pipelines.v2beta.PipelinesApiLifecycleActorFactory"
-  	  config {
-  		...
-  		virtual-private-cloud {
-  	          network-label-key = "my-private-network"
-  	          subnetwork-label-key = "my-private-subnetwork"
-  	          auth = "reference-to-auth-scheme"
-  	        }
-  	    ...
-  	  }  
+    ...
+    PapiV2 {
+      actor-factory = "cromwell.backend.google.pipelines.v2beta.PipelinesApiLifecycleActorFactory"
+      config {
+        ...
+        virtual-private-cloud {
+          network-name = "vpc-network"
+          subnetwork-name = "vpc-subnetwork"
+        }
+        ...
       }
+    }
+  }
+}
+```
+
+The `network-name` and `subnetwork-name` should reference the name of your private network and subnetwork within that
+network respectively. The `subnetwork-name` is an optional config.
+
+For example, if your `virtual-private-cloud` config looks like the one above, then Cromwell will use the value of the
+configuration key, which is `vpc-network` here, as the name of private network and run the jobs on this network.
+If the network name is not present in the config Cromwell will fall back to trying to run jobs on the default network.
+
+If the `network-name` or `subnetwork-name` values contain the string `${projectId}` then that value will be replaced
+by Cromwell with the name of the project running the Pipelines API.
+
+If the `network-name` does not contain a `/` then it will be prefixed with `projects/${projectId}/global/networks/`.
+
+Cromwell will then pass the network and subnetwork values to the Pipelines API. See the documentation for the
+[Cloud Life Sciences API](https://cloud.google.com/life-sciences/docs/reference/rest/v2beta/projects.locations.pipelines/run#Network)
+for more information on the various formats accepted for `network` and `subnetwork`.
+
+#### Virtual Private Network via Labels
+
+```hocon
+backend {
+  ...
+  providers {
+    ...
+    PapiV2 {
+      actor-factory = "cromwell.backend.google.pipelines.v2beta.PipelinesApiLifecycleActorFactory"
+      config {
+        ...
+        virtual-private-cloud {
+          network-label-key = "my-private-network"
+          subnetwork-label-key = "my-private-subnetwork"
+          auth = "reference-to-auth-scheme"
+        }
+        ...
+      }
+    }
   }
 }
 ```
@@ -360,8 +391,8 @@ For example, if your `virtual-private-cloud` config looks like the one above, an
 
 Cromwell will get labels from the project's metadata and look for a label whose key is `my-private-network`.
 Then it will use the value of the label, which is `vpc-network` here, as the name of private network and run the jobs on this network.
-If the network key is not present in the project's metadata Cromwell will fall back to running jobs on the default network.
-
+If the network key is not present in the project's metadata Cromwell will fall back to trying to run jobs using literal
+network labels, and then fall back to running on the default network.
 
 ### Custom Google Cloud SDK container
 Cromwell can't use Google's container registry if VPC Perimeter is used in project.
@@ -370,7 +401,7 @@ Own repository can be used by adding `cloud-sdk-image-url` reference to used con
 ```
 google {
   ...
-  cloud-sdk-image-url = "eu.gcr.io/your-project-id/cloudsdktool/cloud-sdk:275.0.0-slim"
+  cloud-sdk-image-url = "eu.gcr.io/your-project-id/cloudsdktool/cloud-sdk:354.0.0-alpine"
   cloud-sdk-image-size-gb = 1
 }
 ```
@@ -553,6 +584,10 @@ copy of the file on the reference disk, bypassing localization of the input.
 The Cromwell git repository includes a Java-based tool to facilitate the creation of manifests called
 [CromwellRefdiskManifestCreatorApp](https://github.com/broadinstitute/cromwell/tree/develop/CromwellRefdiskManifestCreator).
 Please see the help command of that tool for more details.
+
+Alternatively for public data stored under `gs://gcp-public-data--broad-references` there exists a shell script to
+extract reference data to a new disk and then convert that disk to a public image. For more information see
+[create_images.sh](https://github.com/broadinstitute/cromwell/tree/develop/scripts/reference_disks/create_images.sh).
 
 ### Docker Image Cache Support
 
