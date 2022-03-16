@@ -127,6 +127,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
 
   private lazy val execScript =
     s"""|#!$jobShell
+        |find ${jobPaths.script.parent.pathWithoutScheme} -group root | grep -v script | xargs rm -vrf
         |${jobPaths.script.pathWithoutScheme}
         |""".stripMargin
 
@@ -412,7 +413,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   override def scriptPreamble: String = {
     configuration.fileSystem match {
       case  AWSBatchStorageSystems.s3 => ""
-      case _ => s"find ${jobPaths.script.parent.pathWithoutScheme} -group root | grep -v script | xargs rm -vrf"
+      case _ => ""
     }
   }
 
