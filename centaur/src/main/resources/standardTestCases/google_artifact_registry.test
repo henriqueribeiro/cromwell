@@ -1,0 +1,16 @@
+name: google_artifact_registry
+testFormat: runtwiceexpectingcallcaching
+
+# CROM-6807 Don't retry failures, subsequent runs will fail because of unexpected cache hits from the initial run
+retryTestFailures: false
+
+files {
+  workflow: google_artifact_registry/google_artifact_registry.wdl
+}
+
+metadata {
+  workflowName: wf_hello
+  status: Succeeded
+  "calls.wf_hello.hello.callCaching.result": "Cache Hit: <<CACHE_HIT_UUID>>:wf_hello.hello:-1"
+}
+

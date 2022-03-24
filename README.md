@@ -1,7 +1,9 @@
 [![Build Status](https://travis-ci.com/broadinstitute/cromwell.svg?branch=develop)](https://travis-ci.com/broadinstitute/cromwell?branch=develop)
 [![codecov](https://codecov.io/gh/broadinstitute/cromwell/branch/develop/graph/badge.svg)](https://codecov.io/gh/broadinstitute/cromwell)
 
-## Welcome to Cromwell
+## Welcome to "AWS-friendly" Cromwell
+
+More information regarding AWS features can be found [here](https://github.com/henriqueribeiro/cromwell/tree/master/supportedBackends/aws/src/main/scala/cromwell/backend/impl/aws)
 
 Cromwell is an open-source Workflow Management System for bioinformatics. Licensing is [BSD 3-Clause](LICENSE.txt).
 
@@ -29,6 +31,10 @@ Users with specialized needs who wish to install and maintain their own Cromwell
 [Cromwell's backends](https://cromwell.readthedocs.io/en/stable/backends/Backends/) receive development resources proportional to customer demand. The team is actively developing for Google Cloud and AWS. Maintenance of other backends is primarily community-based.
 
 Cromwell [supports](https://cromwell.readthedocs.io/en/stable/LanguageSupport/) the WDL and CWL workflow languages. The Cromwell team is actively developing WDL, while maintenance for CWL is primarily community-based.  
+
+### Security reports
+
+If you believe you have found a security issue please contact `infosec@broadinstitute.org`.
 
 ### Issue tracking in JIRA
 

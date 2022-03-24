@@ -10,9 +10,11 @@ import common.validation.Validation._
 import cromwell.core.Dispatcher.ServiceDispatcher
 import cromwell.core.{LoadConfig, WorkflowId}
 import cromwell.services.MetadataServicesStore
+import cromwell.services.instrumentation.CromwellInstrumentation
 import cromwell.services.metadata.MetadataArchiveStatus
 import cromwell.services.metadata.MetadataService._
 import cromwell.services.metadata.impl.MetadataDatabaseAccess.WorkflowArchiveStatusAndEndTimestamp
+import cromwell.services.metadata.impl.MetadataStatisticsRecorder.MetadataStatisticsRecorderSettings
 import cromwell.services.metadata.impl.MetadataSummaryRefreshActor.{MetadataSummaryFailure, MetadataSummarySuccess, SummarizeMetadata}
 import cromwell.services.metadata.impl.archiver.{ArchiveMetadataConfig, ArchiveMetadataSchedulerActor}
 import cromwell.services.metadata.impl.builder.MetadataBuilderActor
@@ -32,7 +34,12 @@ object MetadataServiceActor {
 }
 
 case class MetadataServiceActor(serviceConfig: Config, globalConfig: Config, serviceRegistryActor: ActorRef)
-  extends Actor with ActorLogging with MetadataDatabaseAccess with MetadataServicesStore with GracefulShutdownHelper {
+  extends Actor
+    with ActorLogging
+    with MetadataDatabaseAccess
+    with MetadataServicesStore
+    with GracefulShutdownHelper
+    with CromwellInstrumentation {
 
   private val decider: Decider = {
     case _: ActorInitializationException => Escalate
@@ -58,6 +65,13 @@ case class MetadataServiceActor(serviceConfig: Config, globalConfig: Config, ser
   private val metadataReadRowNumberSafetyThreshold: Int =
     serviceConfig.getOrElse[Int]("metadata-read-row-number-safety-threshold", 3000000)
 
+  private val metadataTableMetricsInterval: Option[FiniteDuration] = serviceConfig.getAs[FiniteDuration]("metadata-table-metrics-interval")
+
+  private val metadataTableMetricsPath: NonEmptyList[String] = MetadataServiceActor.MetadataInstrumentationPrefix :+ "table"
+  private val dataFreeMetricsPath: NonEmptyList[String] = metadataTableMetricsPath :+ "data_free"
+  private val dataLengthMetricsPath: NonEmptyList[String] = metadataTableMetricsPath :+ "data_length"
+  private val indexLengthMetricsPath:  NonEmptyList[String] = metadataTableMetricsPath :+ "index_length"
+
   def readMetadataWorkerActorProps(): Props =
     ReadDatabaseMetadataWorkerActor
       .props(metadataReadTimeout, metadataReadRowNumberSafetyThreshold)
@@ -71,7 +85,8 @@ case class MetadataServiceActor(serviceConfig: Config, globalConfig: Config, ser
 
   val dbFlushRate = serviceConfig.getOrElse("db-flush-rate", 5.seconds)
   val dbBatchSize = serviceConfig.getOrElse("db-batch-size", 200)
-  val writeActor = context.actorOf(WriteMetadataActor.props(dbBatchSize, dbFlushRate, serviceRegistryActor, LoadConfig.MetadataWriteThreshold), "WriteMetadataActor")
+  val metadataWriteStatisticsConfig = MetadataStatisticsRecorderSettings(serviceConfig.as[Option[Config]]("metadata-write-statistics"))
+  val writeActor = context.actorOf(WriteMetadataActor.props(dbBatchSize, dbFlushRate, serviceRegistryActor, LoadConfig.MetadataWriteThreshold, metadataWriteStatisticsConfig), "WriteMetadataActor")
 
   implicit val ec = context.dispatcher
   //noinspection ActorMutableStateInspection
@@ -84,6 +99,9 @@ case class MetadataServiceActor(serviceConfig: Config, globalConfig: Config, ser
   private val archiveMetadataActor: Option[ActorRef] = buildArchiveMetadataActor
 
   private val deleteMetadataActor: Option[ActorRef] = buildDeleteMetadataActor
+
+  // if `metadata-table-size-metrics-interval` is specified, schedule sending size metrics at that interval
+  metadataTableMetricsInterval.map(context.system.scheduler.schedule(1.minute, _, self, SendMetadataTableSizeMetrics)(context.dispatcher, self))
 
   private def scheduleSummary(): Unit = {
     metadataSummaryRefreshInterval foreach { interval =>
@@ -161,6 +179,18 @@ case class MetadataServiceActor(serviceConfig: Config, globalConfig: Config, ser
     }
   }
 
+  private def sendMetadataTableSizeMetrics(): Unit = {
+    getMetadataTableSizeInformation onComplete {
+      case Success(v) =>
+        v foreach { d =>
+          sendGauge(dataLengthMetricsPath, d.dataLength)
+          sendGauge(indexLengthMetricsPath, d.indexLength)
+          sendGauge(dataFreeMetricsPath, d.dataFree)
+        }
+      case Failure(e) => log.error(e, s"Error fetching metadata table size metrics. Will try again in $metadataTableMetricsInterval...")
+    }
+  }
+
   def summarizerReceive: Receive = {
     case RefreshSummary => summaryActor foreach { _ ! SummarizeMetadata(metadataSummaryRefreshLimit, sender()) }
     case MetadataSummarySuccess => scheduleSummary()
@@ -171,6 +201,7 @@ case class MetadataServiceActor(serviceConfig: Config, globalConfig: Config, ser
 
   def receive = summarizerReceive orElse {
     case ShutdownCommand => waitForActorsAndShutdown(NonEmptyList.of(writeActor) ++ archiveMetadataActor.toList ++ deleteMetadataActor.toList)
+    case SendMetadataTableSizeMetrics => sendMetadataTableSizeMetrics()
     case action: PutMetadataAction => writeActor forward action
     case action: PutMetadataActionAndRespond => writeActor forward action
     // Assume that listen messages are directed to the write metadata actor

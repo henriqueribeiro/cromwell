@@ -127,8 +127,6 @@ Notes:
 - local hashing means that all used containers are pulled. Make sure you have enough storage
 - enable a database to make the cache persistent over cromwell restarts
 
-
-
 AWS Batch
 ---------
 

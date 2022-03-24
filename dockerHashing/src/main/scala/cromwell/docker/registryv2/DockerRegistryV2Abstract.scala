@@ -54,9 +54,9 @@ object DockerRegistryV2Abstract {
         decoder.decodeJson(json)
           .fold(
             failure =>
-              DecodeResult.failure(
+              DecodeResult.failureT(
                 InvalidMessageBodyFailure(s"Could not decode JSON: $json", Some(failure))),
-            DecodeResult.success(_)
+            DecodeResult.successT(_)
           )
       })
   }
