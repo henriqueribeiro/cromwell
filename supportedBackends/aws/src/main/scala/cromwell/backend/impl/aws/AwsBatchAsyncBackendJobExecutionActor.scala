@@ -538,8 +538,19 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
             Log.debug("container exit code was zero")
             false
         case _ => 
-            val containerStatusReason = lastattempt.container.reason 
-            Log.warn(s"Job failed with Container status reason : '${containerStatusReason}'")
+            // not every failed job has a container exit reason.
+            val containerStatusReason:String = {
+               var lastReason =  lastattempt.container.reason
+               // cast null to empty-string to prevent nullpointer execption.
+               if (lastReason == null || lastReason.isEmpty) {
+                   lastReason = ""
+                   log.debug("No exit reason found for container.")
+               } else {
+                   Log.warn(s"Job failed with Container status reason : '${lastReason}'")
+               }
+               lastReason
+            }
+            // check the list of OOM-keys against the exit reason.
             val RetryMemoryKeys = memoryRetryErrorKeys.toList.flatten
             val retry = RetryMemoryKeys.exists(containerStatusReason.contains)
             Log.debug(s"Retry job based on provided keys : '${retry}'")
