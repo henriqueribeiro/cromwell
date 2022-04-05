@@ -57,7 +57,10 @@ import cromwell.filesystems.s3.S3Path
 import cromwell.filesystems.s3.batch.S3BatchCommandBuilder
 import cromwell.services.keyvalue.KvClient
 import org.slf4j.{Logger, LoggerFactory}
-import software.amazon.awssdk.services.batch.model.{BatchException, SubmitJobResponse}
+import software.amazon.awssdk.services.batch.BatchClient
+//import software.amazon.awssdk.services.batch.model.{BatchException, SubmitJobResponse}
+import software.amazon.awssdk.services.batch.model._
+
 import wom.callable.Callable.OutputDefinition
 import wom.core.FullyQualifiedName
 import wom.expression.NoIoFunctionSet
@@ -184,6 +187,13 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       Option(configuration.awsAuth),
       configuration.fsxMntPoint)
   }
+
+  // setup batch client to query job container info
+  lazy val batchClient: BatchClient = {
+    val builder = BatchClient.builder()
+    configureClient(builder, batchJob.optAwsAuthMode, batchJob.configRegion)
+  }
+
   /* Tries to abort the job in flight
    *
    * @param job A StandardAsyncJob object (has jobId value) to cancel
