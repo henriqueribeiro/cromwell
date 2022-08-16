@@ -15,7 +15,6 @@ import cromwell.core.{Dispatcher, DockerConfiguration}
 import cromwell.docker.DockerInfoActor._
 import cromwell.docker.registryv2.DockerRegistryV2Abstract
 import cromwell.docker.registryv2.flows.aws.{AmazonEcr, AmazonEcrPublic}
-import cromwell.docker.registryv2.flows.alibabacloudcrregistry._
 import cromwell.docker.registryv2.flows.dockerhub.DockerHubRegistry
 import cromwell.docker.registryv2.flows.google.GoogleRegistry
 import cromwell.docker.registryv2.flows.quay.QuayRegistry
@@ -237,7 +236,6 @@ object DockerInfoActor {
       ("dockerhub", { c: DockerRegistryConfig => new DockerHubRegistry(c) }),
       ("google", { c: DockerRegistryConfig => new GoogleRegistry(c) }),
       ("quay", { c: DockerRegistryConfig => new QuayRegistry(c) }),
-      ("alibabacloudcr", {c: DockerRegistryConfig => new AlibabaCloudCRRegistry(c)}),
       ("ecr", {c: DockerRegistryConfig => new AmazonEcr(c)}),
       ("ecr-public", {c: DockerRegistryConfig => new AmazonEcrPublic(c)})
     ).traverse[ErrorOr, DockerRegistry]({
