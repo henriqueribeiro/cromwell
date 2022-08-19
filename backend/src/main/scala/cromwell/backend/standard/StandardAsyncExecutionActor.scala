@@ -364,7 +364,7 @@ trait StandardAsyncExecutionActor
    * to re-do this before sending the response.
    */
   private var jobPathsUpdated: Boolean = false
-  private def updateJobPaths(): Unit = if (!jobPathsUpdated) {
+  def updateJobPaths(): Unit = if (!jobPathsUpdated) {
     // .get's are safe on stdout and stderr after falling back to default names above.
     jobPaths.standardPaths = StandardPaths(
       output = hostPathFromContainerPath(executionStdout),
@@ -1161,7 +1161,7 @@ trait StandardAsyncExecutionActor
         configurationDescriptor.slowJobWarningAfter foreach { duration => self ! WarnAboutSlownessAfter(handle.pendingJob.jobId, duration) }
 
         tellKvJobId(handle.pendingJob) map { _ =>
-          if (logJobIds) jobLogger.info(s"job id: ${handle.pendingJob.jobId}")
+          if (logJobIds) jobLogger.debug(s"job id: ${handle.pendingJob.jobId}")
           tellMetadata(Map(CallMetadataKeys.JobId -> handle.pendingJob.jobId))
           /*
           NOTE: Because of the async nature of the Scala Futures, there is a point in time where we have submitted this or
@@ -1280,7 +1280,7 @@ trait StandardAsyncExecutionActor
     stderrSizeAndReturnCodeAndMemoryRetry flatMap {
       case (stderrSize, returnCodeAsString, retryWithMoreMemory) =>
         val tryReturnCodeAsInt = Try(returnCodeAsString.trim.toInt)
-
+        jobLogger.debug(s"Handling execution Result with status '${status.toString()}' and returnCode ${returnCodeAsString}")
         if (isDone(status)) {
           tryReturnCodeAsInt match {
             // stderr not empty : retry
@@ -1292,12 +1292,17 @@ trait StandardAsyncExecutionActor
             case Success(returnCodeAsInt) if isAbort(returnCodeAsInt) && !retryWithMoreMemory =>
               jobLogger.debug(s"Job was aborted, code was : '${returnCodeAsString}'")
               Future.successful(AbortedExecutionHandle)
+            // if instance killed after RC.txt creation : edge case with status == Failed AND returnCode == [accepted values] => retry.
+            case Success(returnCodeAsInt) if status.toString() == "Failed" && continueOnReturnCode.continueFor(returnCodeAsInt) =>
+                jobLogger.debug(s"Suspected spot kill due to status/RC mismatch")
+                val executionHandle = Future.successful(FailedNonRetryableExecutionHandle(UnExpectedStatus(jobDescriptor.key.tag, returnCodeAsInt, status.toString(), stderrAsOption), Option(returnCodeAsInt), None))
+                retryElseFail(executionHandle)
             // job considered ok by accepted exit code
             case Success(returnCodeAsInt) if continueOnReturnCode.continueFor(returnCodeAsInt) =>
               handleExecutionSuccess(status, oldHandle, returnCodeAsInt)
             // job failed on out-of-memory : retry
             case Success(returnCodeAsInt) if retryWithMoreMemory  =>
-              jobLogger.warn(s"Retrying job due to OOM with exit code : '${returnCodeAsString}' ")
+              jobLogger.info(s"Retrying job due to OOM with exit code : '${returnCodeAsString}' ")
               val executionHandle = Future.successful(FailedNonRetryableExecutionHandle(RetryWithMoreMemory(jobDescriptor.key.tag, stderrAsOption, memoryRetryErrorKeys, log), Option(returnCodeAsInt), None))
               retryElseFail(executionHandle, retryWithMoreMemory)
             // unaccepted return code : retry.
@@ -1338,8 +1343,7 @@ trait StandardAsyncExecutionActor
       if (fileExists)
         asyncIo.contentAsStringAsync(jobPaths.returnCode, None, failOnOverflow = false)
       else {
-        jobLogger.warn("RC file not found. Setting job to failed & retry.")
-        //Thread.sleep(300000)
+        jobLogger.debug("RC file not found. Setting job to failed.")
         Future("1")
       }
     }
