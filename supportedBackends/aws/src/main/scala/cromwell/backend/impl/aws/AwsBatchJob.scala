@@ -55,10 +55,8 @@ import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.{GetObjectRequest, HeadObjectRequest, NoSuchKeyException, PutObjectRequest}
 import wdl4s.parser.MemoryUnit
 
-import java.security.MessageDigest
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.concurrent.duration._
-import scala.language.higherKinds
 import scala.util.Try
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
@@ -136,7 +134,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
 
       case input: AwsBatchFileInput if input.s3key.startsWith("s3://") =>
         s"_s3_localize_with_retry ${input.s3key} ${input.mount.mountPoint.pathAsString}/${input.local}"
-          .replaceAllLiterally(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
+          .replace(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
 
       case input: AwsBatchFileInput =>
         //here we don't need a copy command but the centaurTests expect us to verify the existence of the file
