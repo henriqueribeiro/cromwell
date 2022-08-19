@@ -1,5 +1,88 @@
 # Cromwell Change Log
 
+## 82 Release Notes
+
+ * Restored missing example configuration file
+ * Upgraded to latest version of the Google Cloud Storage NIO library (0.124.8)
+ * Cromwell will now finitely retry the following Google Cloud Storage I/O error.
+   * Response code `400` bad request, message `User project specified in the request is invalid`
+   * The default retry count is `5` and may be customized with `system.io.number-of-attempts`.
+
+## 81 Release Notes
+
+### Workflow labels in TES tasks
+
+Beginning in Cromwell 81 we will populate the `tags` field of tasks created by the TES backend
+with the labels applied to the workflow at creation time.  No guarantee is made about labels
+added while the workflow is running.
+
+### Alibaba BCS backend and OSS filesystem removed
+
+The BCS backend and OSS filesystem (both of which support Alibaba Cloud) have been removed.
+
+## 80 Release Notes
+
+### Direct WES support in Cromwell
+
+Cromwell 80 no longer supports the wes2cromwell project within the Cromwell repository.
+
+In the previous release, 3 Wes2Cromwell endpoints in the Cromwell project were implemented and documented in the Swagger API. Three new endpoints,
+located within the wes2cromwell project, will also be moved, implemented, and documented within Cromwell. As a result of this, we can safely remove 
+and deprecate the wes2cromwell project from the repo.
+
+Previous endpoints:
+
+| HTTP verb | Endpoint path | Description   |
+| --------- | ------------- |---------------|
+| GET | /api/ga4gh/wes/v1/service-info | Server info |
+| POST | /api/ga4gh/wes/v1/runs/{run_id}/cancel | Abort workflow |
+| GET | /api/ga4gh/wes/v1/runs/{run_id}/status | Workflow status |
+
+Newly implemented endpoints:
+
+| HTTP verb | Endpoint path | Description     |
+| --------- | ------------- |-----------------|
+| GET | /api/ga4gh/wes/v1/runs | List workflows  |
+| POST | /api/ga4gh/wes/v1/runs | Submit workflow |
+| GET | /api/ga4gh/wes/v1/runs/{run_id} | Workflow details |
+
+## 79 Release Notes
+
+### Last release with CWL support
+
+Cromwell 79 is the last release with CWL. Support will be removed in Cromwell 80 and above.
+
+CWL will be re-introduced at a later date in the [Terra platform](https://terra.bio/), using a solution other than Cromwell. See the blog post ["Terra’s roadmap to supporting more workflow languages"](https://terra.bio/terras-roadmap-to-supporting-more-workflow-languages/) for details.
+
+| Product                                   | Language | Support               |
+|-------------------------------------------|----------|-----------------------|
+| Cromwell standalone                       | WDL      | :white_check_mark:    |
+| Cromwell standalone                       | CWL      | :x:                    |
+| [Terra SaaS platform](https://terra.bio/) | WDL      | :white_check_mark:    |
+| [Terra SaaS platform](https://terra.bio/) | CWL      | Future support planned |
+
+### Last release with Alibaba Cloud
+
+The BCS backend and OSS filesystem (both of which support Alibaba Cloud) will be removed in version 80.
+
+### WES endpoints preview
+
+As a means to stay on top of endpoints within our repo, 3 new Workflow Execution Service (WES) endpoints are now documented in the Cromwell Swagger (others to follow as part of later work):
+
+| HTTP verb | Endpoint path | Description   |
+| --------- | ------------- |---------------|
+| GET | /api/ga4gh/wes/v1/service-info | Server info |
+| POST | /api/ga4gh/wes/v1/runs/{run_id}/cancel | Abort workflow |
+| GET | /api/ga4gh/wes/v1/runs/{run_id}/status | Workflow status |
+
+### Scala 2.13
+
+Cromwell is now built with Scala version 2.13. This change should not be noticeable to users but may be of interest to developers of Cromwell backend implementations.
+
+### Bug Fixes
+
+ * Fixed a call caching bug in which an invalid cache entry could cause a valid cache entry to be ignored.
+
 ## 75 Release Notes
 
 ### New `AwaitingCloudQuota` backend status
