@@ -49,7 +49,7 @@ import spray.json.{JsObject, JsString}
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.concurrent.Future
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 case class AwsBatchInitializationActorParams
 (
