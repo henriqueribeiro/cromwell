@@ -252,6 +252,66 @@ services {
 2. Add `events:PutEvents` IAM policy to your Cromwell server IAM role. 
 
 
+#### AWS EFS
+
+Cromwell EC2 instances can be equipped with a shared elastic filesystem, termed EFS. Using this filesystem for intermediate data bypasses the need to pass these files around between the cromwell jobs and S3. 
+
+1.  Setup an EFS filesystem: 
+
+Following the [GenomicsWorkFlows](https://docs.opendata.aws/genomics-workflows/orchestration/cromwell/cromwell-overview.html) deployment stack and selecting "Create EFS", you will end up with an EFS filesystem accessible within the provided subnets. It is mounted by default in EC2 workers under /mnt/efs. This is specified in the launch templates USER_DATA if you want to change this. 
+
+Next, it is recommended to change the EFS setup (in console : select EFS service, then the "SharedDataGenomics" volume, edit). Change performance settings to Enhanced/Elastic, because the bursting throughput is usually insufficient. Optionally set the lifecycle to archive infrequently accessed data and reduce costs. 
+
+2. Set Cromwell Configuration
+
+The following directives need to be added to the cromwell configuration:
+
+```
+backend {
+    providers {
+        AWSBatch {
+            config{
+                default-runtime-attributes {
+                    // keep you other settings as they are (queueArn etc)
+
+                    // DEFAULT EFS CONFIG
+                    // delocalize output files under /mnt/efs to the cromwell tmp bucket
+                    efsDelocalize = false
+                    // make md5 sums of output files under /mnt/efs as part of the job 
+                    efsMakeMD5 = false
+                }
+                filesystems {
+                    s3 {
+                        // your s3 settings should remain as they are
+                    }
+                    // add the local directive
+                    local {
+                        // the mountpoint of the EFS volume within the HOST (specified in EC2 launch template)
+                        efs = "/mnt/efs"
+                    }
+
+                }
+            }
+        }
+    }
+}
+
+```
+
+Now, Cromwell is able to correctly handle output files both located in the cromwell working directory (delocalized to S3), and on the EFS volume (kept, and optionally delocalized).
+
+3. Current limitations:
+
+- Call caching is not yet possible when using input files located on EFS.  Cromwell does not crash but issues errors and skips callcaching for that task. 
+
+- There is no unique temp/scratch folder generated per workflow ID. Data collision prevention is left to the user. 
+
+- Cleanup must be done manually
+
+
+
+
+
 AWS Batch
 ---------
 
