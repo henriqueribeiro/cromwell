@@ -62,6 +62,8 @@ sealed trait AwsBatchJobDefinition {
   def containerProperties: ContainerProperties
   def retryStrategy: RetryStrategy
   def name: String
+  
+  
 
   override def toString: String = {
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
@@ -140,8 +142,8 @@ trait AwsBatchJobDefinitionBuilder {
       ).toList
     }
 
-    def buildName(imageName: String, packedCommand: String, volumes: List[Volume], mountPoints: List[MountPoint], env: Seq[KeyValuePair], ulimits: List[Ulimit]): String = {
-      s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}"
+    def buildName(imageName: String, packedCommand: String, volumes: List[Volume], mountPoints: List[MountPoint], env: Seq[KeyValuePair], ulimits: List[Ulimit], efsDelocalize: Boolean, efsMakeMD5: Boolean): String = {
+      s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}"
     }
 
     val environment = List.empty[KeyValuePair]
@@ -151,15 +153,22 @@ trait AwsBatchJobDefinitionBuilder {
     }
     val packedCommand = packCommand("/bin/bash", "-c", cmdName)
     val volumes =  buildVolumes( context.runtimeAttributes.disks, context.fsxMntPoint)
+    Log.warn(volumes.toString)
     val mountPoints = buildMountPoints( context.runtimeAttributes.disks, context.fsxMntPoint)
+    Log.warn(mountPoints.toString)
     val ulimits = buildUlimits( context.runtimeAttributes.ulimits)
+    val efsDelocalize = context.runtimeAttributes.efsDelocalize
+    val efsMakeMD5 = context.runtimeAttributes.efsMakeMD5
+
     val containerPropsName = buildName(
       context.runtimeAttributes.dockerImage,
       packedCommand.mkString(","),
       volumes,
       mountPoints,
       environment,
-      ulimits
+      ulimits,
+      efsDelocalize,
+      efsMakeMD5
     )
 
     (ContainerProperties.builder()
@@ -240,7 +249,11 @@ case class AwsBatchJobDefinitionContext(
             jobPaths: JobPaths,
             inputs: Set[AwsBatchInput],
             outputs: Set[AwsBatchFileOutput],
-            fsxMntPoint: Option[List[String]]){
+            fsxMntPoint: Option[List[String]],
+            efsMntPoint: Option[String],
+            efsMakeMD5: Option[Boolean],
+            efsDelocalize: Option[Boolean]
+            ) {
 
   override def toString: String = {
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
@@ -254,6 +267,9 @@ case class AwsBatchJobDefinitionContext(
       .append("inputs", inputs)
       .append("outputs", outputs)
       .append("fsxMntPoint", fsxMntPoint)
+      .append("efsMntPoint", efsMntPoint)
+      .append("efsMakeMD5", efsMakeMD5)
+      .append("efsDelocalize", efsDelocalize)
       .build
   }
 }
