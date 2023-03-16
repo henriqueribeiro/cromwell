@@ -55,7 +55,6 @@ import cromwell.backend.io.DirectoryFunctions
 import cromwell.backend.io.JobPaths
 import cromwell.backend.standard.{StandardAsyncExecutionActor, StandardAsyncExecutionActorParams, StandardAsyncJob}
 import cromwell.backend.OutputEvaluator._
-
 import cromwell.core._
 import cromwell.core.path.{DefaultPathBuilder, Path, PathBuilder, PathFactory}
 import cromwell.core.io.{DefaultIoCommandBuilder, IoCommandBuilder}
@@ -80,8 +79,7 @@ import scala.concurrent._
 import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.util.control.NoStackTrace
-import scala.util.{Success, Try}
-
+import scala.util.{Success, Try, Failure}
 /**
   * The `AwsBatchAsyncBackendJobExecutionActor` creates and manages a job. The job itself is encapsulated by the
   * functionality in `AwsBatchJob`
@@ -194,7 +192,10 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       jobPaths, Seq.empty[AwsBatchParameter],
       configuration.awsConfig.region,
       Option(configuration.awsAuth),
-      configuration.fsxMntPoint)
+      configuration.fsxMntPoint,
+      configuration.efsMntPoint,
+      Option(runtimeAttributes.efsMakeMD5),
+      Option(runtimeAttributes.efsDelocalize))
   }
 
   // setup batch client to query job container info
@@ -307,16 +308,19 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     *
     * @throws Exception if the `path` does not live in one of the supplied `disks`
     */
-  private def relativePathAndVolume(path: String, disks: Seq[AwsBatchVolume]): (Path, AwsBatchVolume) = {
+  private def relativePathAndVolume(path: String, disks: Seq[AwsBatchVolume] ): (Path, AwsBatchVolume) = {
 
     def getAbsolutePath(path: Path) = {
       configuration.fileSystem match {
         case AWSBatchStorageSystems.s3 => AwsBatchWorkingDisk.MountPoint.resolve(path)
         // case _ => DefaultPathBuilder.get(configuration.root).resolve(path)
-        case _ => AwsBatchWorkingDisk.MountPoint.resolve(path)
+        case _ => 
+            Log.info("non-s3 path detected")
+            Log.info(path.toString)
+            AwsBatchWorkingDisk.MountPoint.resolve(path)
       }
     }
-
+    
     val absolutePath = DefaultPathBuilder.get(path) match {
       case p if !p.isAbsolute => getAbsolutePath(p)
       case p => p
@@ -348,7 +352,8 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     }
 
     val womFileOutputs = jobDescriptor.taskCall.callable.outputs.flatMap(evaluateFiles) map relativeLocalizationPath
-
+    Log.debug("WomFileOutputs:")
+    Log.debug(womFileOutputs.toString())
     val outputs: Seq[AwsBatchFileOutput] = womFileOutputs.distinct flatMap {
       _.flattenFiles flatMap {
         case unlistedDirectory: WomUnlistedDirectory => generateUnlistedDirectoryOutputs(unlistedDirectory)
@@ -533,14 +538,110 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     } yield guaranteedAnswer
   }
 
-  // new OOM detection 
-  override def memoryRetryRC(job: StandardAsyncJob): Future[Boolean] = Future {
+  override def handleExecutionResult(status: StandardAsyncRunState,
+                            oldHandle: StandardAsyncPendingExecutionHandle): Future[ExecutionHandle] = {
+    
+
+    // get path to sderr
+    val stderr = jobPaths.standardPaths.error
+    lazy val stderrAsOption: Option[Path] = Option(stderr)
+    // get the three needed variables, using helper functions below, or direct assignment.
+    val stderrSizeAndReturnCodeAndMemoryRetry = for {
+      returnCodeAsString <- JobExitCode
+      // Only check stderr size if we need to, otherwise this results in a lot of unnecessary I/O that
+      // may fail due to race conditions on quickly-executing jobs.
+      stderrSize <- if (failOnStdErr) asyncIo.sizeAsync(stderr) else Future.successful(0L)
+      retryWithMoreMemory <- memoryRetryRC(oldHandle.pendingJob)
+    } yield (stderrSize, returnCodeAsString, retryWithMoreMemory)
+
+    stderrSizeAndReturnCodeAndMemoryRetry flatMap {
+      case (stderrSize, returnCodeAsString, retryWithMoreMemory) =>
+        val tryReturnCodeAsInt = Try(returnCodeAsString.trim.toInt)
+        jobLogger.debug(s"Handling execution Result with status '${status.toString()}' and returnCode ${returnCodeAsString}")
+        if (isDone(status)) {
+          tryReturnCodeAsInt match {
+            // stderr not empty : retry
+            case Success(returnCodeAsInt) if failOnStdErr && stderrSize.intValue > 0 =>
+              val executionHandle = Future.successful(FailedNonRetryableExecutionHandle(StderrNonEmpty(jobDescriptor.key.tag, stderrSize, stderrAsOption), Option(returnCodeAsInt), None))
+              retryElseFail(executionHandle)
+            // job was aborted (cancelled by user?) 
+            // on AWS OOM kill are code 137 : check retryWithMoreMemory here 
+            case Success(returnCodeAsInt) if isAbort(returnCodeAsInt) && !retryWithMoreMemory =>
+              jobLogger.debug(s"Job was aborted, code was : '${returnCodeAsString.stripLineEnd}'")
+              Future.successful(AbortedExecutionHandle)
+            // if instance killed after RC.txt creation : edge case with status == Failed AND returnCode == [accepted values] => retry.
+            case Success(returnCodeAsInt) if status.toString() == "Failed" && continueOnReturnCode.continueFor(returnCodeAsInt) =>
+                jobLogger.debug(s"Suspected spot kill due to status/RC mismatch")
+                val executionHandle = Future.successful(FailedNonRetryableExecutionHandle(UnExpectedStatus(jobDescriptor.key.tag, returnCodeAsInt, status.toString(), stderrAsOption), Option(returnCodeAsInt), None))
+                retryElseFail(executionHandle)
+            // job considered ok by accepted exit code
+            case Success(returnCodeAsInt) if continueOnReturnCode.continueFor(returnCodeAsInt) =>
+              handleExecutionSuccess(status, oldHandle, returnCodeAsInt)
+            // job failed on out-of-memory : retry
+            case Success(returnCodeAsInt) if retryWithMoreMemory  =>
+              jobLogger.info(s"Retrying job due to OOM with exit code : '${returnCodeAsString.stripLineEnd}' ")
+              val executionHandle = Future.successful(FailedNonRetryableExecutionHandle(RetryWithMoreMemory(jobDescriptor.key.tag, stderrAsOption, memoryRetryErrorKeys, log), Option(returnCodeAsInt), None))
+              retryElseFail(executionHandle, retryWithMoreMemory)
+            // unaccepted return code : retry.
+            case Success(returnCodeAsInt) =>
+              jobLogger.debug(s"Retrying with wrong exit code : '${returnCodeAsString.stripLineEnd}'")
+              val executionHandle = Future.successful(FailedNonRetryableExecutionHandle(WrongReturnCode(jobDescriptor.key.tag, returnCodeAsInt, stderrAsOption), Option(returnCodeAsInt), None))
+              retryElseFail(executionHandle)
+            case Failure(_) =>
+              jobLogger.warn(s"General failure of job with exit code : '${returnCodeAsString.stripLineEnd}'")
+              Future.successful(FailedNonRetryableExecutionHandle(ReturnCodeIsNotAnInt(jobDescriptor.key.tag, returnCodeAsString, stderrAsOption), kvPairsToSave = None))
+          }
+        } else {
+          tryReturnCodeAsInt match {
+            case Success(returnCodeAsInt) if retryWithMoreMemory && !continueOnReturnCode.continueFor(returnCodeAsInt) =>
+              jobLogger.debug(s"job not done but retrying already? : ${status.toString()}")
+              val executionHandle = Future.successful(FailedNonRetryableExecutionHandle(RetryWithMoreMemory(jobDescriptor.key.tag, stderrAsOption, memoryRetryErrorKeys, log), Option(returnCodeAsInt), None))
+              retryElseFail(executionHandle, retryWithMoreMemory)
+            case _ =>
+              val failureStatus = handleExecutionFailure(status, tryReturnCodeAsInt.toOption)
+              retryElseFail(failureStatus)
+          }
+        }
+    } recoverWith {
+      case exception =>
+        if (isDone(status)) Future.successful(FailedNonRetryableExecutionHandle(exception, kvPairsToSave = None))
+        else {
+          val failureStatus = handleExecutionFailure(status, None)
+          retryElseFail(failureStatus)
+        }
+    }
+  
+    
+  }
+    
+ 
+   // get the exit code of the job.
+   def JobExitCode: Future[String] = {
+     
+     // read if the file exists
+     def readRCFile(fileExists: Boolean): Future[String] = {
+       if (fileExists)
+         asyncIo.contentAsStringAsync(jobPaths.returnCode, None, failOnOverflow = false)
+       else {
+         jobLogger.warn("RC file not found in aws version. Setting job to failed.")
+         //Thread.sleep(300000)
+         Future("1")
+       }
+     }
+     //finally : assign the yielded variable
+     for {
+       fileExists <- asyncIo.existsAsync(jobPaths.returnCode)
+       jobRC <- readRCFile(fileExists)
+     } yield jobRC
+   }
+    
+   // new OOM detection 
+   def memoryRetryRC(job: StandardAsyncJob): Future[Boolean] = Future {
       // STATUS LOGIC:
       //   - success : container exit code is zero
       //   - command failure: container exit code > 0, no statusReason in container
       //   - OOM kill : container exit code > 0, statusReason contains "OutOfMemory"
-      //   - spot kill : no container exit code set. statusReason of ATTEMPT (not container) says "host EC2 (...) terminated"
-
+      //   - spot kill : no container exit code set. statusReason of ATTEMPT (not container) says "host EC2 (...) terminated"     
       Log.debug(s"Looking for memoryRetry in job '${job.jobId}'")
       val describeJobsResponse = batchClient.describeJobs(DescribeJobsRequest.builder.jobs(job.jobId).build)
       val jobDetail = describeJobsResponse.jobs.get(0) //OrElse(throw new RuntimeException(s"Could not get job details for job '${job.jobId}'"))
@@ -555,8 +656,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       if (lastattempt == null ) {
         Log.info(s"No attempts were made for job '${job.jobId}'. no memory-related retry needed.")
         false
-      }
-
+      }     
       var containerRC = 
           try {
               lastattempt.container.exitCode
@@ -594,8 +694,11 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       }
         
         
-    }
- 
+   }
+
+  
+
+
   // Despite being a "runtime" exception, BatchExceptions for 429 (too many requests) are *not* fatal:
   override def isFatal(throwable: Throwable): Boolean = throwable match {
     case be: BatchException => !be.getMessage.contains("Status Code: 429")
