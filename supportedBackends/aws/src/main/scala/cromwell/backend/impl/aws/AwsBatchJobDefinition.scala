@@ -62,8 +62,6 @@ sealed trait AwsBatchJobDefinition {
   def containerProperties: ContainerProperties
   def retryStrategy: RetryStrategy
   def name: String
-  
-  
 
   override def toString: String = {
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
@@ -153,9 +151,7 @@ trait AwsBatchJobDefinitionBuilder {
     }
     val packedCommand = packCommand("/bin/bash", "-c", cmdName)
     val volumes =  buildVolumes( context.runtimeAttributes.disks, context.fsxMntPoint)
-    Log.warn(volumes.toString)
     val mountPoints = buildMountPoints( context.runtimeAttributes.disks, context.fsxMntPoint)
-    Log.warn(mountPoints.toString)
     val ulimits = buildUlimits( context.runtimeAttributes.ulimits)
     val efsDelocalize = context.runtimeAttributes.efsDelocalize
     val efsMakeMD5 = context.runtimeAttributes.efsMakeMD5
