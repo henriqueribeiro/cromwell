@@ -302,12 +302,98 @@ Now, Cromwell is able to correctly handle output files both located in the cromw
 
 3. Current limitations:
 
+- To read an task output file in wdl using eg read_tsv(), it must be set to output type 'String' OR 'efsDelocalize' must be enabled for the job.
 - Call caching is not yet possible when using input files located on EFS.  Cromwell does not crash but issues errors and skips callcaching for that task. 
-
 - There is no unique temp/scratch folder generated per workflow ID. Data collision prevention is left to the user. 
-
 - Cleanup must be done manually
 
+4. Example Workflow
+
+The following workflow highlights the following features: 
+ 
+ - take input data from an s3 bucket. 
+ - keep intermediate data on efs
+ - delocalize output from efs volume 
+ - read a file on efs in the main wdl cromwell process.
+
+ 
+```
+version 1.0
+workflow TestEFS {
+    input {
+        # input file for WF is located on S3
+        File s3_file = 's3://aws-quickstart/quickstart-aws-vpc/templates/aws-vpc.template.yaml'
+        # set an input parameter holding the working dir on EFS
+        String efs_wd = "/mnt/efs/MyProject"
+    }
+    # task one : create a file on efs.
+    call task_one {input:
+        infile = s3_file,
+        wd = efs_wd    
+    }
+    # read the outfile straight in a wdl structure
+    Array[Array[String]] myOutString_info = read_tsv(task_one.outfile)
+
+    # task two : reuse the file on the wd and delocalize to s3
+    call task_two {input:
+        wd = efs_wd,
+        infile = task_one.outfile
+    }
+    Array[Array[String]] myOutFile_info = read_tsv(task_two.outfile)
+
+    ## outputs
+    output{
+        Array[Array[String]] wf_out_info_returned_as_string = myOutString_info
+        Array[Array[String]] wf_out_info_returned_as_file = myOutFile_info
+        String wf_out_file = task_two.outfile
+    }
+}
+
+task task_one {
+    input {
+	    File infile
+        String wd
+    }
+    command {
+        # mk the wd:
+        mkdir -p ~{wd}
+        # mv the infile to wd
+        mv ~{infile} ~{wd}/
+        # generate an outfile for output Testing
+        ls -alh ~{wd} > ~{wd}/MyOutFile
+    }
+     runtime {
+        docker: "ubuntu:22.04"
+        cpu : "1"
+        memory: "500M" 
+     }
+     output {
+        # to read a file in cromwell/wdl : pass it back as a string or delocalize (see task_two)
+        String outfile = '~{wd}/MyOutFile'
+     }
+}
+
+task task_two {
+    input {
+        String wd
+        File infile
+    }
+    command {
+        # put something new in the file:
+        ls -alh /tmp > ~{infile}
+        
+    }
+     runtime {
+        docker: "ubuntu:22.04"
+        cpu : "1"
+        memory: "500M" 
+        efsDelocalize: true
+     }
+     output {
+        File outfile = "~{infile}"
+     }
+}
+```
 
 
 
