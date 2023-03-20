@@ -70,7 +70,7 @@ object Settings {
     assembly / assemblyMergeStrategy := customMergeStrategy.value,
   )
 
-  val Scala2_13Version = "2.13.8"
+  val Scala2_13Version = "2.13.9"
   private val ScalaVersion: String = Scala2_13Version
   private val sharedSettings: Seq[Setting[_]] =
     cromwellVersionWithGit ++ publishingSettings ++ List(
@@ -86,6 +86,7 @@ object Settings {
       Tags.limit(Tags.Test, 1)
     ),
     dependencyOverrides ++= cromwellDependencyOverrides,
+    excludeDependencies ++= cromwellExcludeDependencies,
     scalacOptions ++= baseSettings ++ warningSettings ++ consoleHostileSettings,
     // http://stackoverflow.com/questions/31488335/scaladoc-2-11-6-fails-on-throws-tag-with-unable-to-find-any-member-to-link#31497874
     Compile / doc / scalacOptions ++= baseSettings ++ List("-no-link-warnings"),
