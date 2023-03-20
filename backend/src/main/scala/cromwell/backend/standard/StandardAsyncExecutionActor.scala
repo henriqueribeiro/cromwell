@@ -331,6 +331,9 @@ trait StandardAsyncExecutionActor
   /** Any custom code that should be run within commandScriptContents before the instantiated command. */
   def scriptPreamble: String = ""
 
+  /** Any custom code that should be run within commandScriptContents right before exiting. */
+  def scriptClosure: String = ""
+
   def cwd: Path = commandDirectory
   def rcPath: Path = cwd./(jobPaths.returnCodeFilename)
 
@@ -363,7 +366,7 @@ trait StandardAsyncExecutionActor
    * to re-do this before sending the response.
    */
   private var jobPathsUpdated: Boolean = false
-  private def updateJobPaths(): Unit = if (!jobPathsUpdated) {
+  def updateJobPaths(): Unit = if (!jobPathsUpdated) {
     // .get's are safe on stdout and stderr after falling back to default names above.
     jobPaths.standardPaths = StandardPaths(
       output = hostPathFromContainerPath(executionStdout),
@@ -384,7 +387,7 @@ trait StandardAsyncExecutionActor
   def commandScriptContents: ErrorOr[String] = {
     val commandString = instantiatedCommand.commandString
     val commandStringAbbreviated = StringUtils.abbreviateMiddle(commandString, "...", abbreviateCommandLength)
-    jobLogger.info(s"`$commandStringAbbreviated`")
+    jobLogger.debug(s"`$commandStringAbbreviated`")
     tellMetadata(Map(CallMetadataKeys.CommandLine -> commandStringAbbreviated))
 
     val cwd = commandDirectory
@@ -449,12 +452,14 @@ trait StandardAsyncExecutionActor
         |touch $stdoutRedirection $stderrRedirection
         |tee $stdoutRedirection < "$$$out" &
         |tee $stderrRedirection < "$$$err" >&2 &
+        |set -x
         |(
         |cd ${cwd.pathAsString}
         |ENVIRONMENT_VARIABLES
         |INSTANTIATED_COMMAND
         |) $stdinRedirection > "$$$out" 2> "$$$err"
         |echo $$? > $rcTmpPath
+        |set +x
         |$emptyDirectoryFillCommand
         |(
         |cd ${cwd.pathAsString}
@@ -463,12 +468,14 @@ trait StandardAsyncExecutionActor
         |${directoryScripts(directoryOutputs)}
         |)
         |mv $rcTmpPath $rcPath
+        |SCRIPT_CLOSURE
         |""".stripMargin
       .replace("SCRIPT_PREAMBLE", scriptPreamble)
       .replace("ENVIRONMENT_VARIABLES", environmentVariables)
       .replace("INSTANTIATED_COMMAND", commandString)
       .replace("SCRIPT_EPILOGUE", scriptEpilogue)
-      .replace("DOCKER_OUTPUT_DIR_LINK", dockerOutputDir))
+      .replace("DOCKER_OUTPUT_DIR_LINK", dockerOutputDir)
+      .replace("SCRIPT_CLOSURE", scriptClosure))
   }
 
   def runtimeEnvironmentPathMapper(env: RuntimeEnvironment): RuntimeEnvironment = {
@@ -1157,7 +1164,7 @@ trait StandardAsyncExecutionActor
         configurationDescriptor.slowJobWarningAfter foreach { duration => self ! WarnAboutSlownessAfter(handle.pendingJob.jobId, duration) }
 
         tellKvJobId(handle.pendingJob) map { _ =>
-          if (logJobIds) jobLogger.info(s"job id: ${handle.pendingJob.jobId}")
+          if (logJobIds) jobLogger.debug(s"job id: ${handle.pendingJob.jobId}")
           tellMetadata(Map(CallMetadataKeys.JobId -> handle.pendingJob.jobId))
           /*
           NOTE: Because of the async nature of the Scala Futures, there is a point in time where we have submitted this or
@@ -1263,6 +1270,7 @@ trait StandardAsyncExecutionActor
 
     // Returns true if the task has written an RC file that indicates OOM, false otherwise
     def memoryRetryRC: Future[Boolean] = {
+      // convert int to boolean
       def returnCodeAsBoolean(codeAsOption: Option[String]): Boolean = {
         codeAsOption match {
           case Some(codeAsString) =>
@@ -1279,14 +1287,14 @@ trait StandardAsyncExecutionActor
           case None => false
         }
       }
-
+      // read if the file exists
       def readMemoryRetryRCFile(fileExists: Boolean): Future[Option[String]] = {
         if (fileExists)
           asyncIo.contentAsStringAsync(jobPaths.memoryRetryRC, None, failOnOverflow = false).map(Option(_))
         else
           Future.successful(None)
       }
-
+      //finally : assign the yielded variable
       for {
         fileExists <- asyncIo.existsAsync(jobPaths.memoryRetryRC)
         retryCheckRCAsOption <- readMemoryRetryRCFile(fileExists)
@@ -1294,11 +1302,32 @@ trait StandardAsyncExecutionActor
       } yield retryWithMoreMemory
     }
 
+    // get the exit code of the job.
+    def JobExitCode: Future[String] = {
+      
+      // read if the file exists
+      def readRCFile(fileExists: Boolean): Future[String] = {
+        if (fileExists)
+          asyncIo.contentAsStringAsync(jobPaths.returnCode, None, failOnOverflow = false)
+        else {
+          jobLogger.warn("RC file not found. Setting job to failed & waiting 5m before retry.")
+          Thread.sleep(300000)
+          Future("1")
+        }
+      }
+      //finally : assign the yielded variable
+      for {
+        fileExists <- asyncIo.existsAsync(jobPaths.returnCode)
+        jobRC <- readRCFile(fileExists)
+      } yield jobRC
+    }
+
+    // get path to sderr
     val stderr = jobPaths.standardPaths.error
     lazy val stderrAsOption: Option[Path] = Option(stderr)
-
+    // get the three needed variables, using functions above or direct assignment.
     val stderrSizeAndReturnCodeAndMemoryRetry = for {
-      returnCodeAsString <- asyncIo.contentAsStringAsync(jobPaths.returnCode, None, failOnOverflow = false)
+      returnCodeAsString <- JobExitCode
       // Only check stderr size if we need to, otherwise this results in a lot of unnecessary I/O that
       // may fail due to race conditions on quickly-executing jobs.
       stderrSize <- if (failOnStdErr) asyncIo.sizeAsync(stderr) else Future.successful(0L)
@@ -1348,6 +1377,8 @@ trait StandardAsyncExecutionActor
         }
     }
   }
+  
+
 
   /**
     * Send the job id of the running job to the key value store.
