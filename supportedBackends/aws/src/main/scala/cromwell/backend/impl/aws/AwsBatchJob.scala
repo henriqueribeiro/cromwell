@@ -305,7 +305,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     val outputCopyCommand = outputs.map {
       case output: AwsBatchFileOutput if output.local.pathAsString.contains("*") => "" //filter out globs
       case output: AwsBatchFileOutput if output.name.endsWith(".list") && output.name.contains("glob-") =>
-
+        Log.debug("Globbing : check for EFS settings.")
         val s3GlobOutDirectory = output.s3key.replace(".list", "")
         val globDirectory = output.name.replace(".list", "")
         /*
@@ -313,16 +313,49 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          * if it doesn't exist then 'touch' it so that it can be copied otherwise later steps will get upset
          * about the missing file
          */
-        s"""
-           |touch ${output.name}
-           |_s3_delocalize_with_retry ${output.name} ${output.s3key}
-           |if [ -e $globDirectory ]; then _s3_delocalize_with_retry $globDirectory $s3GlobOutDirectory ; fi""".stripMargin
-           
+        if ( efsMntPoint.isDefined && output.mount.mountPoint.pathAsString == efsMntPoint.get ) {
+           Log.debug("EFS glob output file detected: "+ output.s3key + s" / ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}")
+           val test_cmd = if (efsDelocalize.isDefined && efsDelocalize.getOrElse(false)) {
+                    Log.debug("delocalization on EFS is enabled")
+                    s"""
+                        |touch ${output.name}
+                        |_s3_delocalize_with_retry ${output.name} ${output.s3key}
+                        |if [ -e $globDirectory ]; then _s3_delocalize_with_retry $globDirectory $s3GlobOutDirectory ; fi
+                        |""".stripMargin
+                } else {
+                    
+                    // check file for existence
+                    s"test -e ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} || (echo 'output file: ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} does not exist' && exit 1)"
+                }
+           // need to make md5sum? 
+           val md5_cmd = if (efsMakeMD5.isDefined && efsMakeMD5.getOrElse(false)) {
+                    Log.debug("Add cmd to create MD5 sibling.")
+                    s"""
+                        |if [[ ! -f '${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}.md5' ]] ; then 
+                        |   md5sum '${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}' > '${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}.md5' || (echo 'Could not generate ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}.md5' && exit 1 ); 
+                        |fi
+                        |""".stripMargin 
+                } else {
+                    Log.debug("MD5 not enabled: "+efsMakeMD5.get.toString())
+                    ""
+                }
+           // return combined result
+           s"""
+          |${test_cmd}
+          |${md5_cmd}
+          | """.stripMargin
+        } else {
+          // default delocalization command.
+          s"""
+             |touch ${output.name}
+             |_s3_delocalize_with_retry ${output.name} ${output.s3key}
+             |if [ -e $globDirectory ]; then _s3_delocalize_with_retry $globDirectory $s3GlobOutDirectory ; fi""".stripMargin
+        }
 
       // files on /cromwell/ working dir must be delocalized
       case output: AwsBatchFileOutput if output.s3key.startsWith("s3://") && output.mount.mountPoint.pathAsString == AwsBatchWorkingDisk.MountPoint.pathAsString =>
         //output is on working disk mount
-        Log.info("output Data on working disk mount" + output.local.pathAsString)
+        Log.debug("output Data on working disk mount" + output.local.pathAsString)
         s"""_s3_delocalize_with_retry $workDir/${output.local.pathAsString} ${output.s3key}""".stripMargin
 
       // file(name (full path), s3key (delocalized path), local (file basename), mount (disk details))

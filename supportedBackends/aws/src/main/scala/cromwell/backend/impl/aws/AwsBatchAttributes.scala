@@ -61,7 +61,8 @@ case class AwsBatchAttributes(fileSystem: String,
                               fsxMntPoint: Option[List[String]],
                               efsMntPoint: Option[String],
                               efsMakeMD5: Option[Boolean],
-                              efsDelocalize: Option[Boolean]
+                              efsDelocalize: Option[Boolean],
+                              globLinkCommand: Option[String]
                               )
 
 object AwsBatchAttributes {
@@ -90,7 +91,8 @@ object AwsBatchAttributes {
     "awsBatchRetryAttempts",
     "ulimits",
     "efsDelocalize",
-    "efsMakeMD5"
+    "efsMakeMD5",
+    "glob-link-command"
   )
 
   private val deprecatedAwsBatchKeys: Map[String, String] = Map(
@@ -108,7 +110,6 @@ object AwsBatchAttributes {
       val deprecatedKeys = keys.intersect(deprecated.keySet)
       deprecatedKeys foreach { key => logger.warn(s"Found deprecated configuration key $key, replaced with ${deprecated.get(key)}") }
     }
-
     def parseFSx(config: List[String]): Option[List[String]] = {
       config.isEmpty match {
         case true => None
@@ -116,7 +117,7 @@ object AwsBatchAttributes {
       }
     }
 
-    def parseEFS(config: String): Option[String] = {
+    def parseConfigString(config: String): Option[String] = {
       config.isEmpty match {
         case true => None
         case false => Some(config)
@@ -165,7 +166,7 @@ object AwsBatchAttributes {
 
     // EFS settings:
     val efsMntPoint:ErrorOr[Option[String]] = validate {backendConfig.hasPath("filesystems.local.efs") match {
-        case true => parseEFS(backendConfig.getString("filesystems.local.efs"))
+        case true => parseConfigString(backendConfig.getString("filesystems.local.efs"))
         case false => None
       }
     }
@@ -181,6 +182,13 @@ object AwsBatchAttributes {
             case false => None
       }
     }
+    // from config if set.
+    val globLinkCommand:ErrorOr[Option[String]] = validate {
+        backendConfig.hasPath("glob-link-command") match {
+            case true => Some(backendConfig.getString("glob-link-command"))
+            case false => None
+      }
+    }
 
     (
       fileSysStr,
@@ -192,7 +200,8 @@ object AwsBatchAttributes {
       fsxMntPoint,
       efsMntPoint,
       efsMakeMD5,
-      efsDelocalize
+      efsDelocalize,
+      globLinkCommand
     ).tupled.map((AwsBatchAttributes.apply _).tupled) match {
       case Valid(r) => r
       case Invalid(f) =>
