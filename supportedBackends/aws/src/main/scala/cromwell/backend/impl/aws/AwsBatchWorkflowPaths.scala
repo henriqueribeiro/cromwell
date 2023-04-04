@@ -70,8 +70,16 @@ case class AwsBatchWorkflowPaths(workflowDescriptor: BackendWorkflowDescriptor,
   override def config: Config = configuration.configurationDescriptor.backendConfig
   override def pathBuilders: List[PathBuilder] = {
     if (configuration.fileSystem == "s3") {
-      List(configuration.pathBuilderFactory.asInstanceOf[S3PathBuilderFactory].fromProvider(workflowOptions, provider))
+      // if efs is activated : add the default (local) pathbuilders.
+      //println(configuration.batchAttributes.toString)
+      if (configuration.batchAttributes.efsMntPoint.isDefined) {
+        List(configuration.pathBuilderFactory.asInstanceOf[S3PathBuilderFactory].fromProvider(workflowOptions, provider) ) ++ WorkflowPaths.DefaultPathBuilders
+      }
+      else {
+        List(configuration.pathBuilderFactory.asInstanceOf[S3PathBuilderFactory].fromProvider(workflowOptions, provider) )
+      }
     } else {
-      WorkflowPaths.DefaultPathBuilders}
+      WorkflowPaths.DefaultPathBuilders
+    }
   }
 }

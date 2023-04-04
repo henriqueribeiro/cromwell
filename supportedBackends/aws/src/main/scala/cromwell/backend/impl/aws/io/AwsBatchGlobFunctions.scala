@@ -43,6 +43,7 @@ import cromwell.backend.io._
 import cromwell.backend.standard._
 import scala.concurrent.Future
 import java.nio.file.Paths
+import cromwell.core.path.DefaultPathBuilder
 
 //import cromwell.backend.impl.aws.AwsBatchAttributes
 //import cromwell.backend.impl.aws._
@@ -51,20 +52,7 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
     
   def standardParams: StandardExpressionFunctionsParams
 
-  //def config : AwsBatchConfiguration
-
-  //private lazy val evaluateFileFunctions = new IoFunctionSetAdapter(this) with FileEvaluationIoFunctionSet
-
-  //def callContext: CallContext
-
-  //def fromOutputs = call.callable.outputs.flatTraverse[ErrorOr, WomGlobFile] { outputDefinition =>
-  //    outputDefinition.expression.evaluateFiles(jobDescriptor.localInputs, evaluateFileFunctions, outputDefinition.womType) map {
-  //      _.toList.flatMap(_.file.flattenFiles) collect { case glob: WomGlobFile => glob }
-  //    }
-  //  }
-  //  println(s"I'm in AwsBatch glob functions, working on call: ${call.toString}")
-  //  fromOutputs.map(_ ++ call.callable.additionalGlob)
-  //}
+  
 
   /**
     * Returns a list of path from the glob.
@@ -78,9 +66,6 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
     // get access to globName()
     import GlobFunctions._
     
-    //println(s"config : ${config.toString}")
-    println(s" the pattern raw : ${pattern}")
-
     // GOAL : 
     //  - get config (backend / runtime / ...) here to evaluate if efsMntPoint is set & if efs delocalization is set. 
     //  - according to those values : write the pattern as s3:// or as local path. 
@@ -89,23 +74,20 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
     // for now : hard coded as local at mount point /mnt/efs.
     val wfid_regex = ".{8}-.{4}-.{4}-.{4}-.{12}".r
     val wfid = callContext.root.toString.split("/").toList.filter(element => wfid_regex.pattern.matcher(element).matches())(0)
-    println(s" wf id : ${wfid}")
     val globPatternName = globName(s"${pattern}-${wfid}")
     val globbedDir = Paths.get(pattern).getParent.toString
     val listFilePath = if (pattern.startsWith("/mnt/efs/")) {
-        globbedDir + "/." + globPatternName + ".list"
+        DefaultPathBuilder.get(globbedDir + "/." + globPatternName + ".list")
     } else {
         callContext.root.resolve(s"${globPatternName}.list")
     }
-    println(s"in the AwsBatchGlobFunctions.glob function with pattern : ${pattern} and listFilePath: ${listFilePath}")
-    // this requires cromwell.core.path.Path ; but no idea how to go from string to this... 
+
     asyncIo.readLinesAsync(listFilePath.toRealPath()) map { lines =>
       lines.toList map { fileName =>
         // again : this should be config based...
         if (pattern.startsWith("/mnt/efs/")) {
             s"${globbedDir}/.${globPatternName}/${fileName}"
         } else {
-            //(callContext.root /  globPatternName  / fileName).pathAsString
             s"${callContext.root}/${globPatternName}/${fileName}"
         }
       }
