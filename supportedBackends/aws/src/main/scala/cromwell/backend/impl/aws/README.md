@@ -302,18 +302,19 @@ Now, Cromwell is able to correctly handle output files both located in the cromw
 
 3. Current limitations:
 
-- To read an task output file in wdl using eg read_tsv(), it must be set to output type 'String' OR 'efsDelocalize' must be enabled for the job.
-- Call caching is not yet possible when using input files located on EFS.  Cromwell does not crash but issues errors and skips callcaching for that task. 
 - There is no unique temp/scratch folder generated per workflow ID. Data collision prevention is left to the user. 
 - Cleanup must be done manually
+- Globbing only works if efs is mounted under "/mnt/efs" (see config above)
+- CallCaching works to some extend: cached outputs on efs are detected, but the cache copies are placed on s3 again. 
 
 4. Example Workflow
 
 The following workflow highlights the following features: 
  
  - take input data from an s3 bucket. 
- - keep intermediate data on efs
- - delocalize output from efs volume 
+ - generate & keep intermediate data on efs
+ - glob files on s3
+ - delocalize output from efs volume to s3
  - read a file on efs in the main wdl cromwell process.
 
  
@@ -324,28 +325,40 @@ workflow TestEFS {
         # input file for WF is located on S3
         File s3_file = 's3://aws-quickstart/quickstart-aws-vpc/templates/aws-vpc.template.yaml'
         # set an input parameter holding the working dir on EFS
-        String efs_wd = "/mnt/efs/MyProject"
+        String efs_wd = "/mnt/efs/MyTestProject"
     }
-    # task one : create a file on efs.
+    # task one : create a file and a glob on efs. do not delocalize
     call task_one {input:
         infile = s3_file,
         wd = efs_wd    
     }
-    # read the outfile straight in a wdl structure
-    Array[Array[String]] myOutString_info = read_tsv(task_one.outfile)
+    # read the outfile on EFS straight in a wdl structure
+    Array[Array[String]] step1_info = read_tsv(task_one.efs_file)
 
-    # task two : reuse the file on the wd and delocalize to s3
+    # task two : reuse the file on the wd and delocalize to s3 (via runtime setting)
     call task_two {input:
         wd = efs_wd,
-        infile = task_one.outfile
+        infile = task_one.efs_file
     }
-    Array[Array[String]] myOutFile_info = read_tsv(task_two.outfile)
+    Array[Array[String]] step2_info = read_tsv(task_two.outfile)
+
+    # run a task on the globbed files (get md5).
+    call task_three {input:
+        wd = efs_wd,
+        infiles = task_one.file_list,
+        f = task_two.outfile
+    }
+    Array[String] step3_md5s = task_three.md5
 
     ## outputs
     output{
-        Array[Array[String]] wf_out_info_returned_as_string = myOutString_info
-        Array[Array[String]] wf_out_info_returned_as_file = myOutFile_info
-        String wf_out_file = task_two.outfile
+        Array[Array[String]] wf_out_info_step1 = step1_info
+        Array[Array[String]] wf_out_info_step2 = step2_info
+        # be careful : the output of task_one has been overwritten by task two !! 
+        File wf_out_file_step1 = task_one.efs_file
+        File wf_out_file_step2 = task_two.outfile
+        Array[File] wf_out_globList_out = task_one.file_list
+        Array[String] wf_out_step3 = step3_md5s    
     }
 }
 
@@ -356,21 +369,27 @@ task task_one {
     }
     command {
         # mk the wd:
-        mkdir -p ~{wd}
+        mkdir -p ~{wd}/StuffToGlob
+        # create files
+        for i in A B C D E F G H I F K L M N O P Q R; do 
+            echo $i > ~{wd}/StuffToGlob/$i.txt
+        done
         # mv the infile to wd
         mv ~{infile} ~{wd}/
         # generate an outfile for output Testing
         ls -alh ~{wd} > ~{wd}/MyOutFile
+        echo "hello wolrd"
     }
      runtime {
         docker: "ubuntu:22.04"
         cpu : "1"
-        memory: "500M" 
+        memory: "500M"         
      }
      output {
         # to read a file in cromwell/wdl : pass it back as a string or delocalize (see task_two)
-        String outfile = '~{wd}/MyOutFile'
-     }
+        File efs_file = '~{wd}/MyOutFile'
+        Array[File] file_list = glob("~{wd}/StuffToGlob/*.txt")
+     }   
 }
 
 task task_two {
@@ -381,16 +400,36 @@ task task_two {
     command {
         # put something new in the file:
         ls -alh /tmp > ~{infile}
-        
     }
      runtime {
         docker: "ubuntu:22.04"
         cpu : "1"
         memory: "500M" 
         efsDelocalize: true
+        
      }
      output {
         File outfile = "~{infile}"
+     }   
+}
+
+task task_three {
+    input {
+        String wd
+        Array[File] infiles
+        File f
+    }
+    command {    
+        #get checksums for globbed + extra infile
+        md5sum ~{sep=' ' infiles} ~{f}
+    }
+    runtime {
+        docker: "ubuntu:22.04"
+        cpu : "1"
+        memory: "500M"         
+     }
+     output {
+        Array[String] md5 = read_lines(stdout())
      }
 }
 ```
