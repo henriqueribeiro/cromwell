@@ -36,6 +36,9 @@ import cromwell.backend.BackendInitializationData
 import cromwell.backend.impl.aws.AwsBatchBackendInitializationData
 import cromwell.backend.impl.aws.AWSBatchStorageSystems
 import cromwell.core.io.DefaultIoCommandBuilder
+import scala.util.Try
+import cromwell.backend.standard.callcaching.StandardFileHashingActor.SingleFileHashRequest
+import cromwell.core.path.DefaultPathBuilder
 
 class AwsBatchBackendFileHashingActor(standardParams: StandardFileHashingActorParams) extends StandardFileHashingActor(standardParams) {
 
@@ -43,5 +46,28 @@ class AwsBatchBackendFileHashingActor(standardParams: StandardFileHashingActorPa
     .configuration.batchAttributes.fileSystem match {
        case AWSBatchStorageSystems.s3  => S3BatchCommandBuilder
        case _ =>  DefaultIoCommandBuilder
+  }
+  // get backend config.
+  val aws_config = BackendInitializationData.as[AwsBatchBackendInitializationData](standardParams.backendInitializationDataOption).configuration
+  
+  // custom strategy to handle efs (local) files, in case sibling-md5 file is present. 
+  override def customHashStrategy(fileRequest: SingleFileHashRequest): Option[Try[String]] = {
+    val file = DefaultPathBuilder.get(fileRequest.file.valueString)
+    if (aws_config.efsMntPoint.isDefined && file.toString.startsWith(aws_config.efsMntPoint.getOrElse("--")) && aws_config.checkSiblingMd5.getOrElse(false)) {
+            // check existence of the sibling file
+            val md5 = file.sibling(s"${file.toString}.md5")
+            if (md5.exists) {
+                // read the file.
+                val md5_value: Option[String] = Some(md5.contentAsString.split("\\s+")(0))
+                md5_value.map(str => Try(str))
+            } else {
+                // No sibling found, fall back to default.
+                None
+            }
+            
+    } else {
+        // Detected non-EFS file: return None
+        None  
+    }
   }
 }

@@ -325,14 +325,25 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
                 } else {
                     
                     // check file for existence
-                    s"test -e ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} || (echo 'output file: ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} does not exist' && exit 1)"
+                    s"""
+                        |# test the glob list
+                        |test -e ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} || (echo 'output file: ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} does not exist' && exit 1)
+                        |# test individual files.
+                        |for F in $$(cat ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}); do
+                        |   test -e "${globDirectory}/$$F" || (echo 'globbed file: "${globDirectory}/$$F" does not exist' && exit 1)
+                        |done
+                        |"""
                 }
            // need to make md5sum? 
            val md5_cmd = if (efsMakeMD5.isDefined && efsMakeMD5.getOrElse(false)) {
                     Log.debug("Add cmd to create MD5 sibling.")
+                    // this does NOT regenerate the md5 in case the file is overwritten ! 
                     s"""
                         |if [[ ! -f '${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}.md5' ]] ; then 
+                        |   # the glob list
                         |   md5sum '${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}' > '${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}.md5' || (echo 'Could not generate ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}.md5' && exit 1 ); 
+                        |   # globbed files, using specified number of cpus for parallel processing.
+                        |   cat ${output.mount.mountPoint.pathAsString}/${output.local.pathAsString} | xargs -I% -P${runtimeAttributes.cpu.##.toString} bash -c "md5sum ${globDirectory}/% > ${globDirectory}/%.md5"
                         |fi
                         |""".stripMargin 
                 } else {

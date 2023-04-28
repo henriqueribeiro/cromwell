@@ -29,7 +29,7 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-package cromwell.backend.impl.aws
+package cromwell.backend.impl.aws.io
 
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
@@ -39,6 +39,7 @@ import cromwell.core.WorkflowOptions
 import cromwell.core.path.PathBuilder
 import cromwell.filesystems.s3.S3PathBuilderFactory
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider
+import cromwell.backend.impl.aws.{AwsBatchConfiguration,AWSBatchStorageSystems}
 
 object AwsBatchWorkflowPaths {
   private val RootOptionKey = "aws_s3_root"
@@ -71,7 +72,6 @@ case class AwsBatchWorkflowPaths(workflowDescriptor: BackendWorkflowDescriptor,
   override def pathBuilders: List[PathBuilder] = {
     if (configuration.fileSystem == "s3") {
       // if efs is activated : add the default (local) pathbuilders.
-      //println(configuration.batchAttributes.toString)
       if (configuration.batchAttributes.efsMntPoint.isDefined) {
         List(configuration.pathBuilderFactory.asInstanceOf[S3PathBuilderFactory].fromProvider(workflowOptions, provider) ) ++ WorkflowPaths.DefaultPathBuilders
       }

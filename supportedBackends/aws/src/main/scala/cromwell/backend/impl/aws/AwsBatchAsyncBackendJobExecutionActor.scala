@@ -47,7 +47,7 @@ import common.util.StringUtil._
 import common.validation.Validation._
 
 import cromwell.backend._
-import cromwell.backend.async._ //{ExecutionHandle, PendingExecutionHandle}
+import cromwell.backend.async._ 
 import cromwell.backend.impl.aws.IntervalLimitedAwsJobSubmitActor.SubmitAwsJobRequest
 import cromwell.backend.impl.aws.OccasionalStatusPollingActor.{NotifyOfStatus, WhatsMyStatus}
 import cromwell.backend.impl.aws.RunStatus.{Initializing, TerminalRunStatus}
@@ -55,7 +55,6 @@ import cromwell.backend.impl.aws.io._
 
 import cromwell.backend.io.DirectoryFunctions
 import cromwell.backend.io.JobPaths
-//import cromwell.backend.io.GlobFunctions
 import cromwell.backend.standard.{StandardAsyncExecutionActor, StandardAsyncExecutionActorParams, StandardAsyncJob}
 import cromwell.backend.OutputEvaluator._
 import cromwell.core._
@@ -245,13 +244,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         }else if (localPathString.startsWith("s3:/")) {
           localPathString = localPathString.replace("s3:/", "")
         }
-        if (configuration.efsMntPoint.isDefined && localPathString.startsWith(configuration.efsMntPoint.getOrElse("--"))) {
-            Log.debug("local input option")
-            Seq(AwsBatchFileInput(s"$namePrefix-$index", remotePath.valueString, DefaultPathBuilder.get(localPathString), workingDisk))
-        } else {
-            Log.debug("s3 input option")
-            Seq(AwsBatchFileInput(s"$namePrefix-$index", remotePath.valueString, DefaultPathBuilder.get(localPathString), workingDisk))
-        }
+        Seq(AwsBatchFileInput(s"$namePrefix-$index", remotePath.valueString, DefaultPathBuilder.get(localPathString), workingDisk))
     }
     
   }
@@ -265,12 +258,17 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   override protected def relativeLocalizationPath(file: WomFile): WomFile = {
     file.mapFile(value =>
       getPath(value) match {
-        case Success(path) =>
+        // for s3 paths :
+        case Success(path: S3Path) =>
           configuration.fileSystem match  {
-            case AWSBatchStorageSystems.s3 => path.pathWithoutScheme
-            case _ =>  path.toString
+            case AWSBatchStorageSystems.s3 => 
+                path.pathWithoutScheme
+            case _ =>  
+                path.toString
           }
-        case _ => value
+        // non-s3 paths
+        case _ => 
+            value
       }
     )
   }
@@ -328,11 +326,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     def getAbsolutePath(path: Path) = {
       configuration.fileSystem match {
         case AWSBatchStorageSystems.s3 => AwsBatchWorkingDisk.MountPoint.resolve(path)
-        // case _ => DefaultPathBuilder.get(configuration.root).resolve(path)
-        case _ => 
-            Log.info("non-s3 path detected")
-            Log.info(path.toString)
-            AwsBatchWorkingDisk.MountPoint.resolve(path)
+        case _ => AwsBatchWorkingDisk.MountPoint.resolve(path)
       }
     }
     
@@ -340,7 +334,6 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       case p if !p.isAbsolute => getAbsolutePath(p)
       case p => p
     }
-
     disks.find(d => absolutePath.startsWith(d.mountPoint)) match {
       case Some(disk) => (disk.mountPoint.relativize(absolutePath), disk)
       case None =>
@@ -365,9 +358,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       ).getOrElse(List.empty[WomFile].validNel)
        .getOrElse(List.empty)
     }
-
     val womFileOutputs = jobDescriptor.taskCall.callable.outputs.flatMap(evaluateFiles) map relativeLocalizationPath
-    
     val outputs: Seq[AwsBatchFileOutput] = womFileOutputs.distinct flatMap {
       _.flattenFiles flatMap {
         case unlistedDirectory: WomUnlistedDirectory => generateUnlistedDirectoryOutputs(unlistedDirectory)
@@ -426,10 +417,8 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     val output = if (configuration.efsMntPoint.isDefined && 
                      configuration.efsMntPoint.getOrElse("").equals(disk.toString.split(" ")(1)) &&
                      ! runtimeAttributes.efsDelocalize) {
-            Log.debug("local output option")
             AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), makeSafeAwsBatchReferenceName(womFile.value), relpath, disk)
         } else {
-            Log.debug("s3 option")
             AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), destination, relpath, disk)
         }
     List(output)

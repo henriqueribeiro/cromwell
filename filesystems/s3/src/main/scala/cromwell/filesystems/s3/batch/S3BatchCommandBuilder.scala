@@ -30,11 +30,12 @@
  */
 package cromwell.filesystems.s3.batch
 
-import cromwell.core.io.{IoCommandBuilder, IoContentAsStringCommand, IoIsDirectoryCommand, IoReadLinesCommand, IoWriteCommand, PartialIoCommandBuilder}
+import cromwell.core.io.{IoCommandBuilder, IoHashCommand, IoContentAsStringCommand, IoIsDirectoryCommand, IoReadLinesCommand, IoWriteCommand, PartialIoCommandBuilder}
 import cromwell.core.path.BetterFileMethods.OpenOptions
 import cromwell.core.path.Path
 import cromwell.filesystems.s3.S3Path
 import org.slf4j.{Logger, LoggerFactory}
+import cromwell.core.io.DefaultIoCommand.DefaultIoHashCommand
 
 import scala.util.Try
 
@@ -77,8 +78,9 @@ private case object PartialS3BatchCommandBuilder extends PartialIoCommandBuilder
     case (src: S3Path, dest: S3Path) => Try(S3BatchCopyCommand(src, dest))
   }
 
-  override def hashCommand: PartialFunction[Path, Try[S3BatchEtagCommand]] = {
-    case path: S3Path => Try(S3BatchEtagCommand(path))
+  override def hashCommand: PartialFunction[Path, Try[IoHashCommand]] = {
+    case s3_path: S3Path => Try(S3BatchEtagCommand(s3_path).asInstanceOf[IoHashCommand])
+    case local_path: Path => Try(DefaultIoHashCommand(local_path))
   }
 
   override def touchCommand: PartialFunction[Path, Try[S3BatchTouchCommand]] = {

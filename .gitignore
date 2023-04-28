@@ -1,5 +1,6 @@
 # common scala config
 *~
+.metals/
 .DS_Store
 .artifactory
 .bsp
@@ -50,3 +51,5 @@ tesk_application.conf
 **/venv/
 exome_germline_single_sample_v1.3/
 **/*.pyc
+.scalafmt.conf
+.vscode/

@@ -62,7 +62,8 @@ case class AwsBatchAttributes(fileSystem: String,
                               efsMntPoint: Option[String],
                               efsMakeMD5: Option[Boolean],
                               efsDelocalize: Option[Boolean],
-                              globLinkCommand: Option[String]
+                              globLinkCommand: Option[String],
+                              checkSiblingMd5: Option[Boolean]
                               )
 
 object AwsBatchAttributes {
@@ -85,9 +86,6 @@ object AwsBatchAttributes {
     "numCreateDefinitionAttempts",
     "numSubmitAttempts",
     "default-runtime-attributes.scriptBucketName",
-    //"default-runtime-attributes.efsMountPoint",
-    //"default-runtime-attributes.efsMakeMD5",
-    //"default-runtime-attributes.efsDelocalize",
     "awsBatchRetryAttempts",
     "ulimits",
     "efsDelocalize",
@@ -189,6 +187,13 @@ object AwsBatchAttributes {
             case false => None
       }
     }
+    // from config if set:
+    val checkSiblingMd5:ErrorOr[Option[Boolean]] = validate {
+        backendConfig.hasPath("filesystems.local.caching.check-sibling-md5") match {
+            case true => Some(backendConfig.getBoolean("filesystems.local.caching.check-sibling-md5"))
+            case false => None
+      }
+    }
 
     (
       fileSysStr,
@@ -201,7 +206,8 @@ object AwsBatchAttributes {
       efsMntPoint,
       efsMakeMD5,
       efsDelocalize,
-      globLinkCommand
+      globLinkCommand,
+      checkSiblingMd5
     ).tupled.map((AwsBatchAttributes.apply _).tupled) match {
       case Valid(r) => r
       case Invalid(f) =>
