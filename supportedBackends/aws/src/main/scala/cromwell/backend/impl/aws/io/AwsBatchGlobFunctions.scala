@@ -73,7 +73,7 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
 
     // for now : hard coded as local at mount point /mnt/efs.
     val wfid_regex = ".{8}-.{4}-.{4}-.{4}-.{12}".r
-    val wfid = callContext.root.toString.split("/").toList.filter(element => wfid_regex.pattern.matcher(element).matches())(0)
+    val wfid = callContext.root.toString.split("/").toList.filter(element => wfid_regex.pattern.matcher(element).matches()).lastOption.getOrElse("")
     val globPatternName = globName(s"${pattern}-${wfid}")
     val globbedDir = Paths.get(pattern).getParent.toString
     val listFilePath = if (pattern.startsWith("/mnt/efs/")) {
@@ -81,7 +81,6 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
     } else {
         callContext.root.resolve(s"${globPatternName}.list")
     }
-
     asyncIo.readLinesAsync(listFilePath.toRealPath()) map { lines =>
       lines.toList map { fileName =>
         // again : this should be config based...
