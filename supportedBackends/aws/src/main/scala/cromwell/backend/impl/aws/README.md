@@ -273,7 +273,8 @@ backend {
             config{
                 // ALTER THE GLOBBING COMMAND: 
                 // use symlinks instad of hardlinks (not allowed on EFS)
-                glob-link-command = " ln -fs GLOB_PATTERN GLOB_DIRECTORY "
+                //  "shopt -s nullglob" prevents issues with empty globbed folders.  
+                glob-link-command = " shopt -s nullglob; ln -fs GLOB_PATTERN GLOB_DIRECTORY "
 
                 default-runtime-attributes {
                     // keep you other settings as they are (queueArn etc)
