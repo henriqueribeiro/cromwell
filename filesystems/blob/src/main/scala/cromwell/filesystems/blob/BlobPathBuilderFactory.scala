@@ -1,22 +1,29 @@
 package cromwell.filesystems.blob
 
 import akka.actor.ActorSystem
-import com.azure.core.credential.AzureSasCredential
 import com.typesafe.config.Config
 import cromwell.core.WorkflowOptions
 import cromwell.core.path.PathBuilderFactory
-import cromwell.filesystems.blob.BlobPathBuilder
+import cromwell.core.path.PathBuilderFactory.PriorityBlob
 
-import scala.concurrent.ExecutionContext
-import scala.concurrent.Future
+import java.util.UUID
+import scala.concurrent.{ExecutionContext, Future}
 
-final case class BlobPathBuilderFactory(globalConfig: Config, instanceConfig: Config) extends PathBuilderFactory {
+final case class SubscriptionId(value: UUID) {override def toString: String = value.toString}
+final case class BlobContainerName(value: String) {override def toString: String = value}
+final case class StorageAccountName(value: String) {override def toString: String = value}
+final case class EndpointURL(value: String) {override def toString: String = value}
+final case class WorkspaceId(value: UUID) {override def toString: String = value.toString}
+final case class ContainerResourceId(value: UUID) {override def toString: String = value.toString}
+final case class WorkspaceManagerURL(value: String) {override def toString: String = value}
+
+final case class BlobPathBuilderFactory(globalConfig: Config, instanceConfig: Config, fsm: BlobFileSystemManager) extends PathBuilderFactory {
+
   override def withOptions(options: WorkflowOptions)(implicit as: ActorSystem, ec: ExecutionContext): Future[BlobPathBuilder] = {
-    val sasToken: String = instanceConfig.getString("sasToken")
-    val container: String = instanceConfig.getString("store")
-    val endpoint: String = instanceConfig.getString("endpoint")
     Future {
-      new BlobPathBuilder(new AzureSasCredential(sasToken), container, endpoint)
+      new BlobPathBuilder(fsm.container, fsm.endpoint)(fsm)
     }
   }
+
+  override def priority: Int = PriorityBlob
 }
