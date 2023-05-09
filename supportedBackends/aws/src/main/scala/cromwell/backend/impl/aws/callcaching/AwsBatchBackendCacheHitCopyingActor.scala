@@ -30,10 +30,9 @@
  */
 package cromwell.backend.impl.aws.callcaching
 
-import com.google.cloud.storage.contrib.nio.CloudStorageOptions
 import common.util.TryUtil
 import cromwell.backend.BackendInitializationData
-import cromwell.backend.impl.aws.{AWSBatchStorageSystems, AwsBatchBackendInitializationData}
+import cromwell.backend.impl.aws.{AWSBatchStorageSystems, AwsBatchBackendInitializationData,AwsBatchJobCachingActorHelper}
 import cromwell.backend.io.JobPaths
 import cromwell.backend.standard.callcaching.{StandardCacheHitCopyingActor, StandardCacheHitCopyingActorParams}
 import cromwell.core.CallOutputs
@@ -46,7 +45,7 @@ import wom.values.WomFile
 import scala.language.postfixOps
 import scala.util.Try
 
-class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyingActorParams) extends StandardCacheHitCopyingActor(standardParams) {
+class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyingActorParams) extends StandardCacheHitCopyingActor(standardParams) with AwsBatchJobCachingActorHelper{
   private val batchAttributes = BackendInitializationData
     .as[AwsBatchBackendInitializationData](standardParams.backendInitializationDataOption)
     .configuration.batchAttributes
@@ -74,8 +73,9 @@ class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyin
     }
   }
 
+  // detritus files : job script, stdout, stderr and RC files.
   override def processDetritus(sourceJobDetritusFiles: Map[String, String]
-                              ): Try[(Map[String, Path], Set[IoCommand[_]])] =
+                              ): Try[(Map[String, Path], Set[IoCommand[_]])] = {
     (batchAttributes.fileSystem, cachingStrategy) match {
       case (AWSBatchStorageSystems.s3, UseOriginalCachedOutputs) =>
         // apply getPath on each detritus string file
@@ -93,7 +93,7 @@ class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyin
         }
       case (_, _) => super.processDetritus(sourceJobDetritusFiles)
    }
-
+  }
   override protected def additionalIoCommands(sourceCallRootPath: Path,
                                               originalSimpletons: Seq[WomValueSimpleton],
                                               newOutputs: CallOutputs,
@@ -113,7 +113,7 @@ class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyin
           S3BatchCommandBuilder.writeCommand(
             path = jobPaths.forCallCacheCopyAttempts.callExecutionRoot / "call_caching_placeholder.txt",
             content = content,
-            options = Seq(CloudStorageOptions.withMimeType("text/plain")),
+            options = Seq(),
           ).get
         ))
        case (AWSBatchStorageSystems.s3, CopyCachedOutputs) => List.empty
