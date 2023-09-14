@@ -40,7 +40,7 @@ Deployment of the cromwell/AWS environment can be performed using the three clou
 
 Along the way, all necessary IAM rols are generated. 
 
-The full documentation is available [here]:(DEPLOY.md)
+The full documentation is available [here](DEPLOY.md)
 
 
 

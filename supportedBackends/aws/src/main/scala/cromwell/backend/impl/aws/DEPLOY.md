@@ -219,6 +219,14 @@ Running cromwell locally has the benefit of not running an EC2 instance 24/7.  H
     * REDUCE network traffic by enabling the "check-sibling-md5" and "efsMakeMD5" settings
 
 
+### COMPUTE ENVIRONMENT
 
+* You might play around with the instance types to get more options:
+    * clone the compute environment
+    * double check all network settings ! 
+    * replace the "optimal" type by "*.family" types. There is maximal number of entries, so using whole families allows more types
+
+* 
+ 
 
 
