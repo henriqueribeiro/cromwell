@@ -188,10 +188,11 @@ object AwsBatchRuntimeAttributes {
         rtc.getAnyRef(AwsBatchRuntimeAttributes.DisksKey).asInstanceOf[String] // just to prevent complaints about var/val
     } catch {
         case _: ConfigException.Missing => 
-           ""
+           "local-disk"
     }
-    // combine
-    val disks = s"${efs_disks},${rtc_disks}".split(",").toSet.mkString(",")
+    // combine and remove empty values
+    val disks = s"${efs_disks},${rtc_disks}".split(",").toSet.filterNot(_.isEmpty).mkString(",")
+    Log.debug(s"Disks: ${disks}")
     val runtimeConfig = Some(rtc.withValue(AwsBatchRuntimeAttributes.DisksKey, ConfigValueFactory.fromAnyRef(disks)))
     return runtimeConfig
   }
