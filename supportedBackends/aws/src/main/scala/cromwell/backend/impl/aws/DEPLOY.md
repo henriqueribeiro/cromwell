@@ -226,7 +226,18 @@ Running cromwell locally has the benefit of not running an EC2 instance 24/7.  H
     * double check all network settings ! 
     * replace the "optimal" type by "*.family" types. There is maximal number of entries, so using whole families allows more types
 
-* 
+* Extra Queues : You might consider a dedicated queue for high disk/network jobs, by altering the launch template:
+    * Go to Batch console, select the spot compute environment and open the JSON tab. Look for "launchTemplateName" (eg lt-06fa9fee031254098)
+    * Go to EC2 console, select "Launch Templates" in the menu on the left, and search for your launch template
+    * On details, select "Modify Template (create new version)" in the top right under "Actions"
+    * On the resulting page, add a description (eg "HighNetwork"), and then open advanced settings at the bottom of the page
+    * At the bottom, look in "User Data". About halfway, set EBS_* settings. EBS_IOPS can go as high as 16,000 and EBS_THROUGHPUT can go as high as 1,000Mbs/s
+    * Now clone the compute environment (double check all network settings and roles)
+        * specify "exact" launch template version to the version you created. 
+        * set instance type to network/disk optimized machines (eg m5zn.6xlarge)
+        * have a blazing fast I/O machine (tests reached constant simultaneous 1Gb/s upload and 1gb/s download, while transferring novaseq data from basespace to AWS/S3)
+
+        
  
 
 
