@@ -202,7 +202,7 @@ To set up a lifecycle:
     * repeat steps above, with prefix "scripts"
 
 
-## LOCAL CROMWELL INSTANCE
+### LOCAL CROMWELL INSTANCE
 
 Running cromwell locally has the benefit of not running an EC2 instance 24/7.  However, consider the following points: 
 
@@ -237,7 +237,7 @@ Running cromwell locally has the benefit of not running an EC2 instance 24/7.  H
         * set instance type to network/disk optimized machines (eg m5zn.6xlarge)
         * have a blazing fast I/O machine (tests reached constant simultaneous 1Gb/s upload and 1gb/s download, while transferring novaseq data from basespace to AWS/S3)
 
-        
+
  
 
 
