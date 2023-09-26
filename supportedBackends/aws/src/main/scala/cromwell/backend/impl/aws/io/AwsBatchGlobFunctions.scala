@@ -63,7 +63,6 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
     //  - get the wf id from the config settings.
 
     // this function reads in the globfile and locates globbed files : "local" or NIO access is needed to the files. 
-
     // for now : hard coded as local at mount point /mnt/efs.
     val wfid_regex = ".{8}-.{4}-.{4}-.{4}-.{12}".r
     val wfid = callContext.root.toString.split("/").toList.filter(element => wfid_regex.pattern.matcher(element).matches()).lastOption.getOrElse("")

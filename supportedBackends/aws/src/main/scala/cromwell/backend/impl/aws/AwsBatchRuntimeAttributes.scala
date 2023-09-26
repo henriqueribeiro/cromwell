@@ -196,9 +196,8 @@ object AwsBatchRuntimeAttributes {
         case _: ConfigException.Missing => 
            "local-disk"
     }
-    // combine and remove empty values
-    val disks = s"${efs_disks},${rtc_disks}".split(",").toSet.filterNot(_.isEmpty).mkString(",")
-
+    // combine and remove empty values and remove empty values
+    val disks = s"${efs_disks},${rtc_disks}".split(",").toSet.filterNot(_.isEmpty).filterNot(_.isEmpty).mkString(",")
     val runtimeConfig = Some(rtc.withValue(AwsBatchRuntimeAttributes.DisksKey, ConfigValueFactory.fromAnyRef(disks)))
     return runtimeConfig
   }
