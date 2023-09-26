@@ -31,7 +31,7 @@
 
 package cromwell.backend.impl.aws
 
-import java.net.SocketTimeoutException
+import java.net.{SocketTimeoutException, URLDecoder}
 import java.io.FileNotFoundException
 import java.nio.file.Paths
 
@@ -202,7 +202,8 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       configuration.fsxMntPoint,
       configuration.efsMntPoint,
       Option(runtimeAttributes.efsMakeMD5),
-      Option(runtimeAttributes.efsDelocalize))
+      Option(runtimeAttributes.efsDelocalize),
+      Option(runtimeAttributes.tagResources))
   }
 
   // setup batch client to query job container info
@@ -262,13 +263,13 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         case Success(path: S3Path) =>
           configuration.fileSystem match  {
             case AWSBatchStorageSystems.s3 => 
-                path.pathWithoutScheme
+                URLDecoder.decode(path.pathWithoutScheme,"UTF-8")
             case _ =>  
-                path.toString
+                URLDecoder.decode(path.toString,"UTF-8")
           }
         // non-s3 paths
         case _ => 
-            value
+            URLDecoder.decode(value,"UTF-8")
       }
     )
   }
@@ -421,7 +422,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
             AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), womFile.value, relpath, disk)
         } else {
             // if efs is not enabled, OR efs delocalization IS enabled, keep the s3 path as destination.
-            AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), destination, relpath, disk)
+            AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), URLDecoder.decode(destination,"UTF-8"), relpath, disk)
         }
     List(output)
   }
