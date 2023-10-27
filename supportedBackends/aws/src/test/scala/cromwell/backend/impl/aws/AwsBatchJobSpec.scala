@@ -34,7 +34,7 @@ package cromwell.backend.impl.aws
 import common.collections.EnhancedCollections._
 import cromwell.backend.{BackendJobDescriptorKey, BackendWorkflowDescriptor}
 import cromwell.backend.BackendSpec._
-import cromwell.backend.impl.aws.io.AwsBatchWorkingDisk
+import cromwell.backend.impl.aws.io.{AwsBatchJobPaths, AwsBatchWorkflowPaths, AwsBatchWorkingDisk}
 import cromwell.backend.validation.ContinueOnReturnCodeFlag
 import cromwell.core.path.DefaultPathBuilder
 import cromwell.core.TestKitSuite
@@ -118,6 +118,8 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
       scriptS3BucketName = "script-bucket",
       awsBatchRetryAttempts = 1,
       ulimits = Vector(Map.empty[String, String]),
+      efsDelocalize = false,
+      efsMakeMD5 = false,
       fileSystem = "s3")
 
   val containerDetail: ContainerDetail = ContainerDetail.builder().exitCode(0).build()
@@ -127,21 +129,21 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
     val job = AwsBatchJob(null, runtimeAttributes, "commandLine", script,
       "/cromwell_root/hello-rc.txt", "/cromwell_root/hello-stdout.log", "/cromwell_root/hello-stderr.log",
       Seq.empty[AwsBatchInput].toSet, Seq.empty[AwsBatchFileOutput].toSet,
-      jobPaths, Seq.empty[AwsBatchParameter], None, None)
+      jobPaths, Seq.empty[AwsBatchParameter], None, None, None, None, None, None)
     job
   }
   private def generateBasicJobForLocalFS: AwsBatchJob = {
     val job = AwsBatchJob(null, runtimeAttributes.copy(fileSystem="local"), "commandLine", script,
       "/cromwell_root/hello-rc.txt", "/cromwell_root/hello-stdout.log", "/cromwell_root/hello-stderr.log",
       Seq.empty[AwsBatchInput].toSet, Seq.empty[AwsBatchFileOutput].toSet,
-      jobPaths, Seq.empty[AwsBatchParameter], None, None)
+      jobPaths, Seq.empty[AwsBatchParameter], None, None, None, None, None, None)
     job
   }
   private def generateJobWithS3InOut: AwsBatchJob = {
     val job = AwsBatchJob(null, runtimeAttributes, "commandLine", script,
       "/cromwell_root/hello-rc.txt", "/cromwell_root/hello-stdout.log", "/cromwell_root/hello-stderr.log",
       s3Inputs, s3Outputs,
-      jobPaths, Seq.empty[AwsBatchParameter], None, None)
+      jobPaths, Seq.empty[AwsBatchParameter], None, None, None, None, None, None)
     job
   }
 
