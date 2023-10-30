@@ -34,7 +34,7 @@ package cromwell.backend.impl.aws
 import common.collections.EnhancedCollections._
 import cromwell.backend.{BackendJobDescriptorKey, BackendWorkflowDescriptor}
 import cromwell.backend.BackendSpec._
-import cromwell.backend.impl.aws.io.AwsBatchWorkingDisk
+import cromwell.backend.impl.aws.io.{AwsBatchJobPaths, AwsBatchWorkflowPaths, AwsBatchWorkingDisk}
 import cromwell.backend.validation.ContinueOnReturnCodeFlag
 import cromwell.core.path.DefaultPathBuilder
 import cromwell.core.TestKitSuite
@@ -118,6 +118,8 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
       scriptS3BucketName = "script-bucket",
       awsBatchRetryAttempts = 1,
       ulimits = Vector(Map.empty[String, String]),
+      efsDelocalize = false,
+      efsMakeMD5 = false,
       fileSystem = "s3")
 
   val containerDetail: ContainerDetail = ContainerDetail.builder().exitCode(0).build()
@@ -127,21 +129,21 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
     val job = AwsBatchJob(null, runtimeAttributes, "commandLine", script,
       "/cromwell_root/hello-rc.txt", "/cromwell_root/hello-stdout.log", "/cromwell_root/hello-stderr.log",
       Seq.empty[AwsBatchInput].toSet, Seq.empty[AwsBatchFileOutput].toSet,
-      jobPaths, Seq.empty[AwsBatchParameter], None, None)
+      jobPaths, Seq.empty[AwsBatchParameter], None, None, None, None, None, None)
     job
   }
   private def generateBasicJobForLocalFS: AwsBatchJob = {
     val job = AwsBatchJob(null, runtimeAttributes.copy(fileSystem="local"), "commandLine", script,
       "/cromwell_root/hello-rc.txt", "/cromwell_root/hello-stdout.log", "/cromwell_root/hello-stderr.log",
       Seq.empty[AwsBatchInput].toSet, Seq.empty[AwsBatchFileOutput].toSet,
-      jobPaths, Seq.empty[AwsBatchParameter], None, None)
+      jobPaths, Seq.empty[AwsBatchParameter], None, None, None, None, None, None)
     job
   }
   private def generateJobWithS3InOut: AwsBatchJob = {
     val job = AwsBatchJob(null, runtimeAttributes, "commandLine", script,
       "/cromwell_root/hello-rc.txt", "/cromwell_root/hello-stdout.log", "/cromwell_root/hello-stderr.log",
       s3Inputs, s3Outputs,
-      jobPaths, Seq.empty[AwsBatchParameter], None, None)
+      jobPaths, Seq.empty[AwsBatchParameter], None, None, None, None, None, None)
     job
   }
 
@@ -180,107 +182,150 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
 
   it should "add s3 localize with retry function to reconfigured script" in {
     val job = generateBasicJob
-    val retryFunctionText = s"""
-                              |export AWS_METADATA_SERVICE_TIMEOUT=10
-                              |export AWS_METADATA_SERVICE_NUM_ATTEMPTS=10
-                              |
-                              |function _s3_localize_with_retry() {
-                              |  local s3_path=$$1
-                              |  # destination must be the path to a file and not just the directory you want the file in
-                              |  local destination=$$2
-                              |
-                              |  for i in {1..6};
-                              |  do
-                              |    # abort if tries are exhausted
-                              |    if [ "$$i" -eq 6 ]; then
-                              |        echo "failed to copy $$s3_path after $$(( $$i - 1 )) attempts. aborting"
-                              |        exit 2
-                              |    fi
-                              |    # check validity of source path
-                              |    if ! [[ $$s3_path =~ s3://([^/]+)/(.+) ]]; then
-                              |      echo "$$s3_path is not an S3 path with a bucket and key. aborting"
-                              |      exit 1
-                              |    fi
-                              |    # copy  
-                              |    /usr/local/aws-cli/v2/current/bin/aws s3 cp --no-progress "$$s3_path" "$$destination"  ||
-                              |        ( echo "attempt $$i to copy $$s3_path failed" sleep $$((7 * "$$i")) && continue)
-                              |    # check data integrity
-                              |    _check_data_integrity $$destination $$s3_path || 
-                              |       (echo "data content length difference detected in attempt $$i to copy $$local_path failed" && sleep $$((7 * "$$i")) && continue)
-                              |    # copy succeeded
-                              |    break
-                              |  done
-                              |}
-                              |
-                              |function _s3_delocalize_with_retry() {
-                              |  local local_path=$$1
-                              |  # destination must be the path to a file and not just the directory you want the file in
-                              |  local destination=$$2
-                              |
-                              |  for i in {1..6};
-                              |  do
-                              |    # if tries exceeded : abort
-                              |    if [ "$$i" -eq 6 ]; then
-                              |        echo "failed to delocalize $$local_path after $$(( $$i - 1 )) attempts. aborting"
-                              |        exit 2
-                              |    fi
-                              |    # if destination is not a bucket : abort
-                              |    if ! [[ $$destination =~ s3://([^/]+)/(.+) ]]; then 
-                              |     echo "$$destination is not an S3 path with a bucket and key. aborting"
-                              |      exit 1
-                              |    fi
-                              |    # copy ok or try again.
-                              |    if [[ -d "$$local_path" ]]; then
-                              |       # make sure to strip the trailing / in destination 
-                              |       destination=$${destination%/}
-                              |       # glob directory. do recursive copy
-                              |       /usr/local/aws-cli/v2/current/bin/aws s3 cp --no-progress $$local_path $$destination --recursive --exclude "cromwell_glob_control_file" || 
-                              |         ( echo "attempt $$i to copy globDir $$local_path failed" && sleep $$((7 * "$$i")) && continue) 
-                              |       # check integrity for each of the files
-                              |       for FILE in $$(cd $$local_path ; ls | grep -v cromwell_glob_control_file); do
-                              |           _check_data_integrity $$local_path/$$FILE $$destination/$$FILE || 
-                              |               ( echo "data content length difference detected in attempt $$i to copy $$local_path/$$FILE failed" && sleep $$((7 * "$$i")) && continue 2)
-                              |       done
-                              |    else 
-                              |      /usr/local/aws-cli/v2/current/bin/aws s3 cp --no-progress "$$local_path" "$$destination" || 
-                              |         ( echo "attempt $$i to copy $$local_path failed" && sleep $$((7 * "$$i")) && continue) 
-                              |      # check content length for data integrity
-                              |      _check_data_integrity $$local_path $$destination || 
-                              |         ( echo "data content length difference detected in attempt $$i to copy $$local_path failed" && sleep $$((7 * "$$i")) && continue)
-                              |    fi
-                              |    # copy succeeded
-                              |    break
-                              |  done
-                              |}
-                              |
-                              |function _check_data_integrity() {
-                              |  local local_path=$$1
-                              |  local s3_path=$$2
-                              |  
-                              |  # remote : use content_length
-                              |  if [[ $$s3_path =~ s3://([^/]+)/(.+) ]]; then 
-                              |        bucket="$${BASH_REMATCH[1]}"
-                              |        key="$${BASH_REMATCH[2]}"
-                              |  else
-                              |      # this is already checked in the caller function
-                              |      echo "$$s3_path is not an S3 path with a bucket and key. aborting"
-                              |      exit 1
-                              |  fi
-                              |  s3_content_length=$$(/usr/local/aws-cli/v2/current/bin/aws s3api head-object --bucket "$$bucket" --key "$$key" --query 'ContentLength') || 
-                              |        ( echo "Attempt to get head of object failed for $$s3_path." && return 1 )
-                              |  # local
-                              |  local_content_length=$$(LC_ALL=C ls -dn -- "$$local_path" | awk '{print $$5; exit}' ) || 
-                              |        ( echo "Attempt to get local content length failed for $$_local_path." && return 1 )   
-                              |  # compare
-                              |  if [[ "$$s3_content_length" -eq "$$local_content_length" ]]; then
-                              |       true
-                              |  else
-                              |       false  
-                              |  fi
-                              |}
-                              |""".stripMargin
+    val retryFunctionText =
+      s"""
+          |export AWS_METADATA_SERVICE_TIMEOUT=10
+          |export AWS_METADATA_SERVICE_NUM_ATTEMPTS=10
+          |
+          |function _s3_localize_with_retry() {
+          |  local s3_path=$$1
+          |  # destination must be the path to a file and not just the directory you want the file in
+          |  local destination=$$2
+          |
+          |  for i in {1..6};
+          |  do
+          |    # abort if tries are exhausted
+          |    if [ "$$i" -eq 6 ]; then
+          |        echo "failed to copy $$s3_path after $$(( $$i - 1 )) attempts. aborting"
+          |        exit 2
+          |    fi
+          |    # check validity of source path
+          |    if ! [[ $$s3_path =~ s3://([^/]+)/(.+) ]]; then
+          |      echo "$$s3_path is not an S3 path with a bucket and key. aborting"
+          |      exit 1
+          |    fi
+          |    # copy
+          |    /usr/local/aws-cli/v2/current/bin/aws s3 cp --no-progress "$$s3_path" "$$destination"  ||
+          |        { echo "attempt $$i to copy $$s3_path failed" && sleep $$((7 * "$$i")) && continue; }
+          |    # check data integrity
+          |    _check_data_integrity $$destination $$s3_path ||
+          |       { echo "data content length difference detected in attempt $$i to copy $$local_path failed" && sleep $$((7 * "$$i")) && continue; }
+          |    # copy succeeded
+          |    break
+          |  done
+          |}""".stripMargin
 
     job.reconfiguredScript should include (retryFunctionText)
+  }
+
+  it should "s3 delocalization with retry function in reconfigured script" in {
+    val job = generateBasicJob
+    val delocalizeText = s"""
+         |
+         |function _s3_delocalize_with_retry() {
+         |  # input variables
+         |  local local_path=$$1
+         |  # destination must be the path to a file and not just the directory you want the file in
+         |  local destination=$$2
+         |
+         |  # get the multipart chunk size
+         |  chunk_size=$$(_get_multipart_chunk_size $$local_path)
+         |  local MP_THRESHOLD=5368709120
+         |  # then set them
+         |  /usr/local/aws-cli/v2/current/bin/aws configure set default.s3.multipart_threshold $$MP_THRESHOLD
+         |  /usr/local/aws-cli/v2/current/bin/aws configure set default.s3.multipart_chunksize $$chunk_size
+         |
+         |  # try & validate upload 5 times
+         |  for i in {1..6};
+         |  do
+         |    # if tries exceeded : abort
+         |    if [ "$$i" -eq 6 ]; then
+         |        echo "failed to delocalize $$local_path after $$(( $$i - 1 )) attempts. aborting"
+         |        exit 2
+         |    fi
+         |    # if destination is not a bucket : abort
+         |    if ! [[ $$destination =~ s3://([^/]+)/(.+) ]]; then
+         |     echo "$$destination is not an S3 path with a bucket and key. aborting"
+         |      exit 1
+         |    fi
+         |    # copy ok or try again.
+         |    if [[ -d "$$local_path" ]]; then
+         |       # make sure to strip the trailing / in destination
+         |       destination=$${destination%/}
+         |       # glob directory. do recursive copy
+         |       /usr/local/aws-cli/v2/current/bin/aws s3 cp --no-progress $$local_path $$destination --recursive --exclude "cromwell_glob_control_file" ||
+         |         { echo "attempt $$i to copy globDir $$local_path failed" && sleep $$((7 * "$$i")) && continue; }
+         |       # check integrity for each of the files
+         |       for FILE in $$(cd $$local_path ; ls | grep -v cromwell_glob_control_file); do
+         |           _check_data_integrity $$local_path/$$FILE $$destination/$$FILE ||
+         |               { echo "data content length difference detected in attempt $$i to copy $$local_path/$$FILE failed" && sleep $$((7 * "$$i")) && continue 2; }
+         |       done
+         |    else
+         |      /usr/local/aws-cli/v2/current/bin/aws s3 cp --no-progress "$$local_path" "$$destination" ||
+         |         { echo "attempt $$i to copy $$local_path failed" && sleep $$((7 * "$$i")) && continue; }
+         |      # check content length for data integrity
+         |      _check_data_integrity $$local_path $$destination ||
+         |         { echo "data content length difference detected in attempt $$i to copy $$local_path failed" && sleep $$((7 * "$$i")) && continue; }
+         |    fi
+         |    # copy succeeded
+         |    break
+         |  done
+         |}""".stripMargin
+    job.reconfiguredScript should include (delocalizeText)
+  }
+
+  it should "generate check data integrity in reconfigured script" in {
+    val job = generateBasicJob
+    val checkDataIntegrityBlock =
+      s"""
+         |function _check_data_integrity() {
+         |  local local_path=$$1
+         |  local s3_path=$$2
+         |
+         |  # remote : use content_length
+         |  if [[ $$s3_path =~ s3://([^/]+)/(.+) ]]; then
+         |        bucket="$${BASH_REMATCH[1]}"
+         |        key="$${BASH_REMATCH[2]}"
+         |  else
+         |      # this is already checked in the caller function
+         |      echo "$$s3_path is not an S3 path with a bucket and key. aborting"
+         |      exit 1
+         |  fi
+         |  s3_content_length=$$(/usr/local/aws-cli/v2/current/bin/aws s3api head-object --bucket "$$bucket" --key "$$key" --query 'ContentLength') ||
+         |        { echo "Attempt to get head of object failed for $$s3_path." && return 1; }
+         |  # local
+         |  local_content_length=$$(LC_ALL=C ls -dnL -- "$$local_path" | awk '{print $$5; exit}' ) ||
+         |        { echo "Attempt to get local content length failed for $$_local_path." && return 1; }
+         |  # compare
+         |  if [[ "$$s3_content_length" -eq "$$local_content_length" ]]; then
+         |       true
+         |  else
+         |       false
+         |  fi
+         |}
+         |""".stripMargin
+    job.reconfiguredScript should include (checkDataIntegrityBlock)
+  }
+
+  it should "generate get multipart chunk size in script" in {
+    val job = generateBasicJob
+    val getMultiplePartChunkSize =
+      s"""
+         |function _get_multipart_chunk_size() {
+         |  local file_path=$$1
+         |  # file size
+         |  file_size=$$(stat --printf="%s" $$file_path)
+         |  # chunk_size : you can have at most 10K parts with at least one 5MB part
+         |  # this reflects the formula in s3-copy commands of cromwell (S3FileSystemProvider.java)
+         |  #   => long partSize = Math.max((objectSize / 10000L) + 1, 5 * 1024 * 1024);
+         |  a=$$(( ( file_size / 10000) + 1 ))
+         |  b=$$(( 5 * 1024 * 1024 ))
+         |  chunk_size=$$(( a > b ? a : b ))
+         |  echo $$chunk_size
+         |}
+         |""".stripMargin
+
+    job.reconfiguredScript should include (getMultiplePartChunkSize)
   }
 
   it should "generate postscript with output copy command in reconfigured script" in {
@@ -290,13 +335,10 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
          |{
          |set -e
          |echo '*** DELOCALIZING OUTPUTS ***'
-         |
          |_s3_delocalize_with_retry /tmp/scratch/baa s3://bucket/somewhere/baa
          |
-         |
          |if [ -f /tmp/scratch/hello-rc.txt ]; then _s3_delocalize_with_retry /tmp/scratch/hello-rc.txt ${job.jobPaths.returnCode} ; fi
-         |
-         |if [ -f /tmp/scratch/hello-stderr.log ]; then _s3_delocalize_with_retrys /tmp/scratch/hello-stderr.log ${job.jobPaths.standardPaths.error}; fi
+         |if [ -f /tmp/scratch/hello-stderr.log ]; then _s3_delocalize_with_retry /tmp/scratch/hello-stderr.log ${job.jobPaths.standardPaths.error}; fi
          |if [ -f /tmp/scratch/hello-stdout.log ]; then _s3_delocalize_with_retry /tmp/scratch/hello-stdout.log ${job.jobPaths.standardPaths.output}; fi
          |
          |echo '*** COMPLETED DELOCALIZATION ***'
@@ -308,6 +350,8 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
          |""".stripMargin
     job.reconfiguredScript should include (postscript)
   }
+
+
 
   it should "generate preamble with input copy command in reconfigured script" in {
     val job = generateJobWithS3InOut
@@ -345,7 +389,4 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
     val job = generateBasicJob
     job.rc(jobDetail) should be (0)
   }
-
-
-
 }
