@@ -32,7 +32,7 @@
 package cromwell.backend.impl.aws
 
 import common.collections.EnhancedCollections._
-import cromwell.backend.{BackendJobDescriptorKey, BackendWorkflowDescriptor}
+import cromwell.backend.{BackendJobDescriptor, BackendJobDescriptorKey, BackendWorkflowDescriptor}
 import cromwell.backend.BackendSpec._
 import cromwell.backend.impl.aws.io.{AwsBatchJobPaths, AwsBatchWorkflowPaths, AwsBatchWorkingDisk}
 import cromwell.backend.validation.ContinueOnReturnCodeFlag
@@ -46,7 +46,7 @@ import org.scalatest.PrivateMethodTester
 import org.scalatest.flatspec.AnyFlatSpecLike
 import org.scalatest.matchers.should.Matchers
 import software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider
-import software.amazon.awssdk.services.batch.model.{ContainerDetail, JobDetail, KeyValuePair}
+import software.amazon.awssdk.services.batch.model.{ContainerDetail, EvaluateOnExit, JobDetail, KeyValuePair, RetryAction, RetryStrategy}
 import spray.json.{JsObject, JsString}
 import wdl4s.parser.MemoryUnit
 import wom.format.MemorySize
@@ -100,6 +100,8 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
 
   val call: CommandCallNode = workFlowDescriptor.callable.taskCallNodes.head
   val jobKey: BackendJobDescriptorKey = BackendJobDescriptorKey(call, None, 1)
+  val jobDescriptor: BackendJobDescriptor = BackendJobDescriptor(null, null, null, Map.empty, null, null, null)
+
   val jobPaths: AwsBatchJobPaths = AwsBatchJobPaths(workflowPaths, jobKey)
   val s3Inputs: Set[AwsBatchInput] = Set(AwsBatchFileInput("foo", "s3://bucket/foo", DefaultPathBuilder.get("foo"), AwsBatchWorkingDisk()))
   val s3Outputs: Set[AwsBatchFileOutput] = Set(AwsBatchFileOutput("baa", "s3://bucket/somewhere/baa", DefaultPathBuilder.get("baa"), AwsBatchWorkingDisk()))
@@ -117,10 +119,18 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
       noAddress = false,
       scriptS3BucketName = "script-bucket",
       awsBatchRetryAttempts = 1,
+      awsBatchEvaluateOnExit = Vector(Map.empty[String, String]),
       ulimits = Vector(Map.empty[String, String]),
       efsDelocalize = false,
       efsMakeMD5 = false,
       fileSystem = "s3")
+
+  val batchJobDefintion = AwsBatchJobDefinitionContext(
+    runtimeAttributes = runtimeAttributes,
+    commandText = "", dockerRcPath = "", dockerStdoutPath = "", dockerStderrPath = "", jobDescriptor = jobDescriptor
+    , jobPaths = jobPaths, inputs = Set(), outputs = Set(), fsxMntPoint = None, None, None, None
+
+  )
 
   val containerDetail: ContainerDetail = ContainerDetail.builder().exitCode(0).build()
   val jobDetail: JobDetail = JobDetail.builder().container(containerDetail).build
@@ -351,8 +361,6 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
     job.reconfiguredScript should include (postscript)
   }
 
-
-
   it should "generate preamble with input copy command in reconfigured script" in {
     val job = generateJobWithS3InOut
     val preamble =
@@ -388,5 +396,37 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
     val jobDetail: JobDetail = JobDetail.builder().container(containerDetail).build
     val job = generateBasicJob
     job.rc(jobDetail) should be (0)
+  }
+
+  it should "use RetryStrategy" in {
+    val runtime = runtimeAttributes.copy(
+      awsBatchEvaluateOnExit = Vector(Map("action" -> "EXIT", "onStatusReason" -> "Failed")),
+    )
+
+    val builder = RetryStrategy.builder().attempts(1).evaluateOnExit(
+      EvaluateOnExit.builder().onStatusReason("Failed").action(RetryAction.EXIT).build()
+    ).build()
+
+    val jobDefinition = StandardAwsBatchJobDefinitionBuilder.build(batchJobDefintion.copy(runtimeAttributes = runtime))
+    val jobDefinitionName = jobDefinition.name
+    val expected = jobDefinition.retryStrategy
+    expected should equal (builder)
+    jobDefinitionName should equal ("cromwell_ubuntu_latest_656d5a7e7cd016d2360b27bc5ee75018d91a777a")
+  }
+
+  it should "use RetryStrategy evaluateOnExit should be case insensitive" in {
+    val runtime = runtimeAttributes.copy(
+      awsBatchEvaluateOnExit = Vector(Map("aCtIoN" -> "EXIT", "onStatusReason" -> "Failed")),
+    )
+
+    val builder = RetryStrategy.builder().attempts(1).evaluateOnExit(
+      EvaluateOnExit.builder().onStatusReason("Failed").action(RetryAction.EXIT).build()
+    ).build()
+
+    val jobDefinition = StandardAwsBatchJobDefinitionBuilder.build(batchJobDefintion.copy(runtimeAttributes = runtime))
+    val jobDefinitionName = jobDefinition.name
+    val expected = jobDefinition.retryStrategy
+    expected should equal(builder)
+    jobDefinitionName should equal("cromwell_ubuntu_latest_66a335d761780e64e6b154339c5f1db2f0783f96")
   }
 }
