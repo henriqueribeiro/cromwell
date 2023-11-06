@@ -165,9 +165,15 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     val mp_threshold : Long = if (conf.hasPath("engine.filesystems.s3.MultipartThreshold") ) conf.getMemorySize("engine.filesystems.s3.MultipartThreshold").toBytes() else 5L * 1024L * 1024L * 1024L; 
     Log.debug(s"MultiPart Threshold for delocalizing is $mp_threshold")
 
-    val workflowId = jobDescriptor.workflowDescriptor.id.toString
-    val workflowName = jobDescriptor.workflowDescriptor.callable.name.toString
-    val taskId = jobDescriptor.key.call.fullyQualifiedName + "-" + jobDescriptor.key.index + "-" + jobDescriptor.key.attempt
+    // prepare tags, strip invalid characters
+    val invalidCharsPattern = "[^a-zA-Z0-9_.:/=+-@]+".r
+    Log.debug(s"root workflow id: ${jobDescriptor.workflowDescriptor.rootWorkflowId.toString}")
+    Log.debug(s"root workflow name: ${jobDescriptor.workflowDescriptor.rootWorkflow.name.toString}")
+    
+    
+    val workflowId = invalidCharsPattern.replaceAllIn(jobDescriptor.workflowDescriptor.rootWorkflowId.toString,"_")
+    val workflowName = invalidCharsPattern.replaceAllIn(jobDescriptor.workflowDescriptor.rootWorkflow.name.toString,"_")
+    val taskId = invalidCharsPattern.replaceAllIn(jobDescriptor.key.call.fullyQualifiedName + "-" + jobDescriptor.key.index + "-" + jobDescriptor.key.attempt,"_")
     val doTagging = tagResources.getOrElse(false) // development : always tag resources.
     //val tags: Map[String,String] = Map("cromwell-workflow-name" -> workflowName, "cromwell-workflow-id" -> workflowId, "cromwell-task-id" -> taskId)
     // this goes at the start of the script after the #!
@@ -318,16 +324,16 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |  echo " - Tagging instance $$INSTANCE_ID"
          |  # add tags. if tag key exists, append tag if value not in comma seperated list yet. 
          |  # info : tags wfid, taskID cannot have spaces by design. wfName does not allow spaces in WDL spec. 
-         |  WFIDS=$$(_combine_tags $$($awsCmd ec2 describe-tags --filters "Name=resource-id,Values=$$INSTANCE_ID" "Name=key,Values=cromwell-workflow-id" --query 'Tags[].Value' --output text) $$WFID)
+         |  WFIDS=$$(_combine_tags $$($awsCmd ec2 describe-tags --filters "Name=resource-id,Values=$$INSTANCE_ID" "Name=key,Values=cromwell-root-workflow-id" --query 'Tags[].Value' --output text) $$WFID)
          |  TASKIDS=$$(_combine_tags $$($awsCmd ec2 describe-tags --filters "Name=resource-id,Values=$$INSTANCE_ID" "Name=key,Values=cromwell-task-id" --query 'Tags[].Value' --output text) $$TASKID)
-         |  WFNAMES=$$(_combine_tags $$($awsCmd ec2 describe-tags --filters "Name=resource-id,Values=$$INSTANCE_ID" "Name=key,Values=cromwell-workflow-name" --query 'Tags[].Value' --output text) $$WFNAME)
-         |  $awsCmd ec2 create-tags --resources $$INSTANCE_ID --tags Key=cromwell-workflow-id,Value="$$WFIDS" Key=cromwell-task-id,Value="$$TASKIDS" Key=cromwell-workflow-name,Value="$$WFNAMES"
+         |  WFNAMES=$$(_combine_tags $$($awsCmd ec2 describe-tags --filters "Name=resource-id,Values=$$INSTANCE_ID" "Name=key,Values=cromwell-root-workflow-name" --query 'Tags[].Value' --output text) $$WFNAME)
+         |  $awsCmd ec2 create-tags --resources $$INSTANCE_ID --tags Key=cromwell-root-workflow-id,Value="$$WFIDS" Key=cromwell-task-id,Value="$$TASKIDS" Key=cromwell-root-workflow-name,Value="$$WFNAMES"
          |  for VOLUME_ID in $$VOLUME_IDS; do
          |     echo " - Tagging volume $$VOLUME_ID"
-         |     WFIDS=$$(_combine_tags $$($awsCmd ec2 describe-tags --filters "Name=resource-id,Values=$$VOLUME_ID" "Name=key,Values=cromwell-workflow-id" --query 'Tags[].Value' --output text) $$WFID)
+         |     WFIDS=$$(_combine_tags $$($awsCmd ec2 describe-tags --filters "Name=resource-id,Values=$$VOLUME_ID" "Name=key,Values=cromwell-root-workflow-id" --query 'Tags[].Value' --output text) $$WFID)
          |     TASKIDS=$$(_combine_tags $$($awsCmd ec2 describe-tags --filters "Name=resource-id,Values=$$VOLUME_ID" "Name=key,Values=cromwell-task-id" --query 'Tags[].Value' --output text) $$TASKID)
-         |     WFNAMES=$$(_combine_tags $$($awsCmd ec2 describe-tags --filters "Name=resource-id,Values=$$VOLUME_ID" "Name=key,Values=cromwell-workflow-name" --query 'Tags[].Value' --output text) $$WFNAME)
-         |     $awsCmd ec2 create-tags --resources $$VOLUME_ID --tags Key=cromwell-workflow-id,Value="$$WFIDS" Key=cromwell-task-id,Value="$$TASKIDS" Key=cromwell-workflow-name,Value="$$WFNAMES"
+         |     WFNAMES=$$(_combine_tags $$($awsCmd ec2 describe-tags --filters "Name=resource-id,Values=$$VOLUME_ID" "Name=key,Values=cromwell-root-workflow-name" --query 'Tags[].Value' --output text) $$WFNAME)
+         |     $awsCmd ec2 create-tags --resources $$VOLUME_ID --tags Key=cromwell-root-workflow-id,Value="$$WFIDS" Key=cromwell-task-id,Value="$$TASKIDS" Key=cromwell-root-workflow-name,Value="$$WFNAMES"
          |  done
          |}
          |
@@ -564,8 +570,9 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
 
       val workflowId = jobDescriptor.workflowDescriptor.id.toString
       val workflowName = jobDescriptor.workflowDescriptor.callable.name.toString
+      val rootworkflowId = jobDescriptor.workflowDescriptor.rootWorkflowId.toString
       Log.debug(s"Submitting taskId: $taskId, job definition : $definitionArn, script: $batch_script")
-      Log.info(s"Submitting taskId: $workflowId::$taskId, script: $batch_script")
+      Log.info(s"Submitting taskId: $rootworkflowId::$taskId, script: $batch_script")
       
       // prepare the job request
       var submitJobRequest = SubmitJobRequest.builder()
@@ -587,7 +594,15 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
         .jobDefinition(definitionArn)
       // tagging activated : add to request
       if (tagResources.getOrElse(false)) {
-          val tags: Map[String,String] = Map("cromwell-workflow-name" -> workflowName, "cromwell-workflow-id" -> workflowId, "cromwell-task-id" -> taskId)
+          // replace invalid characters in the tags
+          val invalidCharsPattern = "[^a-zA-Z0-9_.:/=+-@]+".r
+          val tags: Map[String,String] = Map(
+            "cromwell-workflow-name" -> invalidCharsPattern.replaceAllIn(workflowName,"_"), 
+            "cromwell-workflow-id" -> invalidCharsPattern.replaceAllIn(workflowId,"_"), 
+            "cromwell-task-id" -> invalidCharsPattern.replaceAllIn(taskId,"_"),
+            "cromwell-root-workflow-name" -> invalidCharsPattern.replaceAllIn(jobDescriptor.workflowDescriptor.rootWorkflow.name.toString,"_"),
+            "cromwell-root-workflow-id" -> invalidCharsPattern.replaceAllIn(jobDescriptor.workflowDescriptor.rootWorkflowId.toString,"_")
+            )
           submitJobRequest = submitJobRequest.tags(tags.asJava).propagateTags(true)
       }
       // submit
