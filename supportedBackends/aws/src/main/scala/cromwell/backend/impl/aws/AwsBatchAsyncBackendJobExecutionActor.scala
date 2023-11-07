@@ -690,7 +690,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       // STATUS LOGIC:
       //   - success : container exit code is zero
       //   - command failure: container exit code > 0, no statusReason in container
-      //   - OOM kill : container exit code > 0, statusReason contains "OutOfMemory"
+      //   - OOM kill : container exit code > 0, statusReason contains "OutOfMemory" OR exit code == 137
       //   - spot kill : no container exit code set. statusReason of ATTEMPT (not container) says "host EC2 (...) terminated"     
       Log.debug(s"Looking for memoryRetry in job '${job.jobId}'")
       val describeJobsResponse = batchClient.describeJobs(DescribeJobsRequest.builder.jobs(job.jobId).build)
@@ -723,6 +723,9 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         case "0" => 
             Log.debug("container exit code was zero. job succeeded")
             false
+        case "137" => 
+            Log.info("Job failed with Container status reason : 'OutOfMemory' (code:137)")
+            true
         case _ => 
             // failed job due to command errors (~ user errors) don't have a container exit reason.
             val containerStatusReason:String = {
