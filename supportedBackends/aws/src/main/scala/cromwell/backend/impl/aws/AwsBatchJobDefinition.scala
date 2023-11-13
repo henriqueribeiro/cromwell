@@ -34,7 +34,7 @@ package cromwell.backend.impl.aws
 import scala.collection.mutable.ListBuffer
 import cromwell.backend.BackendJobDescriptor
 import cromwell.backend.io.JobPaths
-import software.amazon.awssdk.services.batch.model.{ContainerProperties, Host, KeyValuePair, MountPoint, ResourceRequirement, ResourceType, RetryStrategy, Ulimit, Volume}
+import software.amazon.awssdk.services.batch.model.{ContainerProperties, EvaluateOnExit, Host, KeyValuePair, MountPoint, ResourceRequirement, ResourceType, RetryAction, RetryStrategy, Ulimit, Volume}
 import cromwell.backend.impl.aws.io.AwsBatchVolume
 
 import scala.jdk.CollectionConverters._
@@ -183,9 +183,30 @@ trait AwsBatchJobDefinitionBuilder {
 
   def retryStrategyBuilder(context: AwsBatchJobDefinitionContext): (RetryStrategy.Builder, String) = {
     // We can add here the 'evaluateOnExit' statement
-    (RetryStrategy.builder()
-      .attempts(context.runtimeAttributes.awsBatchRetryAttempts),
-     context.runtimeAttributes.awsBatchRetryAttempts.toString)
+    var builder = RetryStrategy.builder()
+      .attempts(context.runtimeAttributes.awsBatchRetryAttempts)
+
+    var evaluations: Seq[EvaluateOnExit] = Seq()
+    context.runtimeAttributes.awsBatchEvaluateOnExit.foreach(
+      (evaluate) => {
+        val evaluateBuilder = evaluate.foldLeft(EvaluateOnExit.builder()) {
+          case (acc, (k, v)) => (k.toLowerCase, v.toLowerCase) match {
+            case ("action", "retry") => acc.action(RetryAction.RETRY)
+            case ("action", "exit") => acc.action(RetryAction.EXIT)
+            case ("onexitcode", _) => acc.onExitCode(v)
+            case ("onreason", _) => acc.onReason(v)
+            case ("onstatusreason", _) => acc.onStatusReason(v)
+            case _ => acc
+          }
+        }
+        evaluations = evaluations :+ evaluateBuilder.build()
+      }
+    )
+
+    builder = builder.evaluateOnExit(evaluations.asJava)
+
+    (builder,
+     s"${context.runtimeAttributes.awsBatchRetryAttempts.toString}${context.runtimeAttributes.awsBatchEvaluateOnExit.toString}")
   }
 
 
