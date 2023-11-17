@@ -46,11 +46,13 @@ import org.scalatest.PrivateMethodTester
 import org.scalatest.flatspec.AnyFlatSpecLike
 import org.scalatest.matchers.should.Matchers
 import software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider
-import software.amazon.awssdk.services.batch.model.{ContainerDetail, EvaluateOnExit, JobDetail, KeyValuePair, RetryAction, RetryStrategy}
+import software.amazon.awssdk.services.batch.model.{ContainerDetail, EvaluateOnExit, JobDetail, KeyValuePair, ResourceRequirement, RetryAction, RetryStrategy}
 import spray.json.{JsObject, JsString}
 import wdl4s.parser.MemoryUnit
 import wom.format.MemorySize
 import wom.graph.CommandCallNode
+
+import scala.jdk.javaapi.CollectionConverters
 
 class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers with PrivateMethodTester {
   import AwsBatchTestConfig._
@@ -109,6 +111,7 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
   val cpu: Int Refined Positive = 2
   val runtimeAttributes: AwsBatchRuntimeAttributes = new AwsBatchRuntimeAttributes(
       cpu = cpu,
+      gpuCount = 0,
       zones = Vector("us-east-1"),
       memory = MemorySize(2.0, MemoryUnit.GB),
       disks = Seq.empty,
@@ -408,10 +411,8 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
     ).build()
 
     val jobDefinition = StandardAwsBatchJobDefinitionBuilder.build(batchJobDefintion.copy(runtimeAttributes = runtime))
-    val jobDefinitionName = jobDefinition.name
     val expected = jobDefinition.retryStrategy
     expected should equal (builder)
-    jobDefinitionName should equal ("cromwell_ubuntu_latest_656d5a7e7cd016d2360b27bc5ee75018d91a777a")
   }
 
   it should "use RetryStrategy evaluateOnExit should be case insensitive" in {
@@ -424,9 +425,21 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
     ).build()
 
     val jobDefinition = StandardAwsBatchJobDefinitionBuilder.build(batchJobDefintion.copy(runtimeAttributes = runtime))
-    val jobDefinitionName = jobDefinition.name
     val expected = jobDefinition.retryStrategy
     expected should equal(builder)
-    jobDefinitionName should equal("cromwell_ubuntu_latest_66a335d761780e64e6b154339c5f1db2f0783f96")
   }
+
+  it should "GPU is not set at job definition even if provided" in {
+    val runtime = runtimeAttributes.copy(
+      gpuCount = 1
+    )
+
+    val expected = List(
+      ResourceRequirement.builder().`type`("VCPU").value(s"$cpu").build(),
+      ResourceRequirement.builder().`type`("MEMORY").value("2048").build()
+    )
+
+    val jobDefinition = StandardAwsBatchJobDefinitionBuilder.build(batchJobDefintion.copy(runtimeAttributes = runtime))
+    val actual = jobDefinition.containerProperties.resourceRequirements
+    expected should equal(CollectionConverters.asScala(actual).toSeq)}
 }

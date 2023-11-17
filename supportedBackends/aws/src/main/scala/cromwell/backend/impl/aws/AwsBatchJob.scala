@@ -474,22 +474,30 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       Log.debug(s"Submitting taskId: $taskId, job definition : $definitionArn, script: $batch_script")
       Log.info(s"Submitting taskId: $taskId, script: $batch_script")
 
+      //provide job environment variables, vcpu and memory
+      var resourceRequirements: Seq[ResourceRequirement] = Seq(
+        ResourceRequirement.builder().`type`(ResourceType.VCPU).value(runtimeAttributes.cpu.##.toString).build(),
+        ResourceRequirement.builder().`type`(ResourceType.MEMORY).value(runtimeAttributes.memory.to(MemoryUnit.MB).amount.toInt.toString).build()
+      )
+
+      if (runtimeAttributes.gpuCount > 0) {
+        val gpuRequirement = ResourceRequirement.builder().`type`(ResourceType.GPU).value(runtimeAttributes.gpuCount.toString)
+        resourceRequirements = resourceRequirements :+ gpuRequirement.build()
+      }
+
+
       val submit: F[SubmitJobResponse] =
         async.delay(batchClient.submitJob(
           SubmitJobRequest.builder()
             .jobName(sanitize(jobDescriptor.taskCall.fullyQualifiedName))
             .parameters(parameters.collect({ case i: AwsBatchInput => i.toStringString }).toMap.asJava)
 
-            //provide job environment variables, vcpu and memory
             .containerOverrides(
               ContainerOverrides.builder
                 .environment(
                   generateEnvironmentKVPairs(runtimeAttributes.scriptS3BucketName, scriptKeyPrefix, scriptKey): _*
                 )
-                .resourceRequirements(
-                  ResourceRequirement.builder().`type`(ResourceType.VCPU).value(runtimeAttributes.cpu.##.toString).build(),
-                  ResourceRequirement.builder().`type`(ResourceType.MEMORY).value(runtimeAttributes.memory.to(MemoryUnit.MB).amount.toInt.toString).build()
-                )
+                .resourceRequirements(resourceRequirements.asJava)
                 .build()
             )
             .jobQueue(runtimeAttributes.queueArn)

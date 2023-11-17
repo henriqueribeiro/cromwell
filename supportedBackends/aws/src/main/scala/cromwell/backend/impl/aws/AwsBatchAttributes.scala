@@ -89,6 +89,7 @@ object AwsBatchAttributes {
     "awsBatchRetryAttempts",
     "awsBatchEvaluateOnExit",
     "ulimits",
+    "gpuCount",
     "efsDelocalize",
     "efsMakeMD5",
     "glob-link-command"
