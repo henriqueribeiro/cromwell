@@ -78,7 +78,7 @@ public abstract class AmazonS3Factory {
     }
 
     /**
-     * should return a new S3Client given the content of the buailder
+     * should return a new S3Client given the content of the builder
      * @param builder the builder that provides the settings for the client
      * @return an s3 client
      *
