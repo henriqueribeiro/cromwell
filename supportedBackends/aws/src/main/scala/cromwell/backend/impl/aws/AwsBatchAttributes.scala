@@ -88,6 +88,7 @@ object AwsBatchAttributes {
     "numSubmitAttempts",
     "default-runtime-attributes.scriptBucketName",
     "awsBatchRetryAttempts",
+    "awsBatchEvaluateOnExit",
     "ulimits",
     "efsDelocalize",
     "efsMakeMD5",

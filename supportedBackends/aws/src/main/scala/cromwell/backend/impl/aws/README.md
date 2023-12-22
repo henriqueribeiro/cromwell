@@ -75,6 +75,37 @@ runtime {
 }
 ```
 
+### `awsBatchEvaluteOnExit`
+
+*Default: _[]_* - will always retry 
+
+This runtime attribute sets the `evaluateOnExit` for [*AWS Batch Automated Job Retries*](https://docs.aws.amazon.com/batch/latest/userguide/job_retries.html) and specify the retry condition for a failed job.
+
+This configuration works with `awsBatchRetryAttempts` and is useful if you only want to retry on certain failures. 
+
+For instance, if you will only like to retry during spot termination.
+
+```
+runtime {
+    awsBatchEvaluateOnExit: [
+        {  
+            Action: "RETRY",
+            onStatusReason: "Host EC2*"
+        },
+        {
+            onReason : "*"
+            Action: "EXIT"
+        }
+    ]
+}
+```
+
+For more information on the batch retry strategy, please refer to:
+
+* General Doc: [userguide/job_retries.html](https://docs.aws.amazon.com/batch/latest/userguide/job_retries.html)
+* Blog: [Introducing retry strategies](https://aws.amazon.com/blogs/compute/introducing-retry-strategies-for-aws-batch/)
+
+
 ### `ulimits`
 
 *Default: _empty_*
@@ -227,6 +258,7 @@ In the AWS backend those notifications can be send to **SNS Topic** or **EventBr
 #### AWS SNS
 
 1. Create an SNS topic, add the following to your `cromwell.conf` file and replace `topicArn` with the topic's ARN you just created:
+2. By default, all cromwell events will be publish to sns. Set `publishStatusOnly = true` if you only publish events that are `status` updates.
 
 ```
 services {
@@ -241,12 +273,13 @@ services {
                 }]
                 region = "us-east-1"
                 topicArn = "<topicARN>"
+                publishStatusOnly = true
             }
         }
     }
 }
 ```
-2. Add `sns:Publish` IAM policy to your Cromwell server IAM role. 
+3. Add `sns:Publish` IAM policy to your Cromwell server IAM role. 
 
 #### AWS EventBridge
 
