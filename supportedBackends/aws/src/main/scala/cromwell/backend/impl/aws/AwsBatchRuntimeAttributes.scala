@@ -71,6 +71,7 @@ import scala.jdk.CollectionConverters._
  * @param ulimits ulimit values to be passed to the container
  * @param efsDelocalize should we delocalize efs files to s3
  * @param efsMakeMD5 should we make a sibling md5 file as part of the job 
+ * @param tagResources should we tag resources
  */
 case class AwsBatchRuntimeAttributes(cpu: Int Refined Positive,
                                      zones: Vector[String],
@@ -87,7 +88,8 @@ case class AwsBatchRuntimeAttributes(cpu: Int Refined Positive,
                                      ulimits: Vector[Map[String, String]],
                                      efsDelocalize: Boolean,
                                      efsMakeMD5 : Boolean,
-                                     fileSystem: String= "s3")
+                                     fileSystem: String= "s3",
+                                     tagResources: Boolean = false)
 
 object AwsBatchRuntimeAttributes {
   val Log: Logger = LoggerFactory.getLogger(this.getClass)
@@ -103,7 +105,7 @@ object AwsBatchRuntimeAttributes {
 
   val awsBatchefsDelocalizeKey = "efsDelocalize"
   val awsBatchefsMakeMD5Key = "efsMakeMD5"
-
+  val tagResourcesKey = "tagResources"
   val ZonesKey = "zones"
   private val ZonesDefaultValue = WomString("us-east-1a")
 
@@ -182,6 +184,11 @@ object AwsBatchRuntimeAttributes {
     .configDefaultWomValue(runtimeConfig).getOrElse(WomBoolean(false)))
   }
 
+  private def awsBatchtagResourcesValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Boolean] = {
+      AwsBatchtagResourcesValidation(AwsBatchRuntimeAttributes.tagResourcesKey).withDefault(AwsBatchtagResourcesValidation(AwsBatchRuntimeAttributes.tagResourcesKey)
+      .configDefaultWomValue(runtimeConfig).getOrElse(WomBoolean(false)))
+  }
+
   private def ulimitsValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Vector[Map[String, String]]] =
    UlimitsValidation.withDefault(UlimitsValidation.configDefaultWomValue(runtimeConfig) getOrElse UlimitsDefaultValue)
 
@@ -197,7 +204,6 @@ object AwsBatchRuntimeAttributes {
     }
     // efs disk configs is set (can be None) in configuration
     val efs_disks = configuration.efsMntPoint.getOrElse("")
-    // TODO : fsx ? 
     // additional disks optionally set as runtime attributes
     val rtc_disks = try {
         rtc.getAnyRef(AwsBatchRuntimeAttributes.DisksKey).asInstanceOf[String] // just to prevent complaints about var/val
@@ -205,9 +211,8 @@ object AwsBatchRuntimeAttributes {
         case _: ConfigException.Missing => 
            "local-disk"
     }
-    // combine and remove empty values
-    val disks = s"${efs_disks},${rtc_disks}".split(",").toSet.filterNot(_.isEmpty).mkString(",")
-    Log.debug(s"Disks: ${disks}")
+    // combine and remove empty values and remove empty values
+    val disks = s"${efs_disks},${rtc_disks}".split(",").toSet.filterNot(_.isEmpty).filterNot(_.isEmpty).mkString(",")
     val runtimeConfig = Some(rtc.withValue(AwsBatchRuntimeAttributes.DisksKey, ConfigValueFactory.fromAnyRef(disks)))
     return runtimeConfig
   }
@@ -229,7 +234,8 @@ object AwsBatchRuntimeAttributes {
                         awsBatchEvaluateOnExitValidation(runtimeConfig),
                         ulimitsValidation(runtimeConfig),
                         awsBatchefsDelocalizeValidation(runtimeConfig),
-                        awsBatchefsMakeMD5Validation(runtimeConfig)
+                        awsBatchefsMakeMD5Validation(runtimeConfig),
+                        awsBatchtagResourcesValidation(runtimeConfig)
                       )
    def validationsLocalBackend  = StandardValidatedRuntimeAttributesBuilder.default(runtimeConfig).withValidation(
       cpuValidation(runtimeConfig),
@@ -245,7 +251,8 @@ object AwsBatchRuntimeAttributes {
       awsBatchEvaluateOnExitValidation(runtimeConfig),
       ulimitsValidation(runtimeConfig),
       awsBatchefsDelocalizeValidation(runtimeConfig),
-      awsBatchefsMakeMD5Validation(runtimeConfig)
+      awsBatchefsMakeMD5Validation(runtimeConfig),
+      awsBatchtagResourcesValidation(runtimeConfig)
     )
 
     configuration.fileSystem match  {
@@ -275,7 +282,7 @@ object AwsBatchRuntimeAttributes {
     val ulimits: Vector[Map[String, String]] = RuntimeAttributesValidation.extract(ulimitsValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
     val efsDelocalize: Boolean = RuntimeAttributesValidation.extract(awsBatchefsDelocalizeValidation(runtimeAttrsConfig),validatedRuntimeAttributes)
     val efsMakeMD5: Boolean = RuntimeAttributesValidation.extract(awsBatchefsMakeMD5Validation(runtimeAttrsConfig),validatedRuntimeAttributes)
-    
+    val tagResources: Boolean = RuntimeAttributesValidation.extract(awsBatchtagResourcesValidation(runtimeAttrsConfig),validatedRuntimeAttributes)
     new AwsBatchRuntimeAttributes(
       cpu,
       zones,
@@ -292,7 +299,8 @@ object AwsBatchRuntimeAttributes {
       ulimits,
       efsDelocalize,
       efsMakeMD5,
-      fileSystem
+      fileSystem,
+      tagResources
     )
   }
 }
@@ -619,6 +627,14 @@ class AwsBatchefsMakeMD5Validation(key: String) extends BooleanRuntimeAttributes
   override protected def missingValueMessage: String = s"Expecting $key runtime attribute to be an Boolean"
 }
 
+object AwsBatchtagResourcesValidation {
+  def apply(key: String): AwsBatchtagResourcesValidation = new AwsBatchtagResourcesValidation(key)
+}
+
+class AwsBatchtagResourcesValidation(key: String) extends BooleanRuntimeAttributesValidation(key) {
+  
+  override protected def missingValueMessage: String = s"Expecting $key runtime attribute to be a Boolean"
+}   
 
 object UlimitsValidation
     extends RuntimeAttributesValidation[Vector[Map[String, String]]] {
