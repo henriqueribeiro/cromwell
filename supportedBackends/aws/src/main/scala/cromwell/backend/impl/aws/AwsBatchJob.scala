@@ -571,6 +571,17 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       Log.debug(s"Submitting taskId: $taskId, job definition : $definitionArn, script: $batch_script")
       Log.info(s"Submitting taskId: $rootworkflowId::$taskId, script: $batch_script")
       
+      //provide job environment variables, vcpu and memory
+      var resourceRequirements: Seq[ResourceRequirement] = Seq(
+        ResourceRequirement.builder().`type`(ResourceType.VCPU).value(runtimeAttributes.cpu.##.toString).build(),
+        ResourceRequirement.builder().`type`(ResourceType.MEMORY).value(runtimeAttributes.memory.to(MemoryUnit.MB).amount.toInt.toString).build()
+      )
+
+      if (runtimeAttributes.gpuCount > 0) {
+        val gpuRequirement = ResourceRequirement.builder().`type`(ResourceType.GPU).value(runtimeAttributes.gpuCount.toString)
+        resourceRequirements = resourceRequirements :+ gpuRequirement.build()
+      }
+          
       // prepare the job request
       var submitJobRequest = SubmitJobRequest.builder()
         .jobName(sanitize(jobDescriptor.taskCall.fullyQualifiedName))
@@ -581,10 +592,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
             .environment(
               generateEnvironmentKVPairs(runtimeAttributes.scriptS3BucketName, scriptKeyPrefix, scriptKey): _*
             )
-            .resourceRequirements(
-              ResourceRequirement.builder().`type`(ResourceType.VCPU).value(runtimeAttributes.cpu.##.toString).build(),
-              ResourceRequirement.builder().`type`(ResourceType.MEMORY).value(runtimeAttributes.memory.to(MemoryUnit.MB).amount.toInt.toString).build()
-            )
+            .resourceRequirements(resourceRequirements.asJava)
             .build()
         )
         .jobQueue(runtimeAttributes.queueArn)
