@@ -34,7 +34,7 @@ package cromwell.backend.impl.aws
 import scala.collection.mutable.ListBuffer
 import cromwell.backend.BackendJobDescriptor
 import cromwell.backend.io.JobPaths
-import software.amazon.awssdk.services.batch.model.{ContainerProperties, Host, KeyValuePair, MountPoint, ResourceRequirement, ResourceType, RetryStrategy, Ulimit, Volume}
+import software.amazon.awssdk.services.batch.model.{ContainerProperties, EvaluateOnExit, Host, KeyValuePair, MountPoint, ResourceRequirement, ResourceType, RetryAction, RetryStrategy, Ulimit, Volume}
 import cromwell.backend.impl.aws.io.AwsBatchVolume
 
 import scala.jdk.CollectionConverters._
@@ -101,6 +101,12 @@ trait AwsBatchJobDefinitionBuilder {
         Volume.builder()
           .name("awsCliHome")
           .host(Host.builder().sourcePath("/usr/local/aws-cli").build())
+          .build(),
+        // the location of the instance-id on the host (set by cloud-init)
+        // https://cloudinit.readthedocs.io/en/23.2.2/reference/faq.html#data
+        Volume.builder()
+          .name("instanceId")
+          .host(Host.builder().sourcePath("/var/lib/cloud/data/instance-id").build())
           .build()
       ) ++ fsx_volumes
     }
@@ -125,7 +131,14 @@ trait AwsBatchJobDefinitionBuilder {
           .sourceVolume("awsCliHome")
           //where the aws-cli will be on the container
           .containerPath("/usr/local/aws-cli")
+          .build(),
+        // the location of the instance-id on the container, used to tag the instance
+        MountPoint.builder()
+          .readOnly(true)
+          .sourceVolume("instanceId")
+          .containerPath("/var/lib/cloud/data/instance-id")
           .build()
+
       ) ++ fsx_disks
     }
 
@@ -140,8 +153,8 @@ trait AwsBatchJobDefinitionBuilder {
       ).toList
     }
 
-    def buildName(imageName: String, packedCommand: String, volumes: List[Volume], mountPoints: List[MountPoint], env: Seq[KeyValuePair], ulimits: List[Ulimit], efsDelocalize: Boolean, efsMakeMD5: Boolean): String = {
-      s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}"
+    def buildName(imageName: String, packedCommand: String, volumes: List[Volume], mountPoints: List[MountPoint], env: Seq[KeyValuePair], ulimits: List[Ulimit], efsDelocalize: Boolean, efsMakeMD5: Boolean, tagResources: Boolean): String = {
+      s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}:${tagResources.toString}"
     }
 
     val environment = List.empty[KeyValuePair]
@@ -155,6 +168,7 @@ trait AwsBatchJobDefinitionBuilder {
     val ulimits = buildUlimits( context.runtimeAttributes.ulimits)
     val efsDelocalize = context.runtimeAttributes.efsDelocalize
     val efsMakeMD5 = context.runtimeAttributes.efsMakeMD5
+    val tagResources = context.runtimeAttributes.tagResources
 
     val containerPropsName = buildName(
       context.runtimeAttributes.dockerImage,
@@ -164,9 +178,12 @@ trait AwsBatchJobDefinitionBuilder {
       environment,
       ulimits,
       efsDelocalize,
-      efsMakeMD5
+      efsMakeMD5,
+      tagResources
     )
 
+    // To reuse job definition for gpu and gpu-runs, we will create a job definition that does not gpu requirements
+    // since aws batch does not allow you to set gpu as 0 when you dont need it. you will always need cpu and memory
     (ContainerProperties.builder()
       .image(context.runtimeAttributes.dockerImage)
       .command(packedCommand.asJava)
@@ -183,9 +200,30 @@ trait AwsBatchJobDefinitionBuilder {
 
   def retryStrategyBuilder(context: AwsBatchJobDefinitionContext): (RetryStrategy.Builder, String) = {
     // We can add here the 'evaluateOnExit' statement
-    (RetryStrategy.builder()
-      .attempts(context.runtimeAttributes.awsBatchRetryAttempts),
-     context.runtimeAttributes.awsBatchRetryAttempts.toString)
+    var builder = RetryStrategy.builder()
+      .attempts(context.runtimeAttributes.awsBatchRetryAttempts)
+
+    var evaluations: Seq[EvaluateOnExit] = Seq()
+    context.runtimeAttributes.awsBatchEvaluateOnExit.foreach(
+      (evaluate) => {
+        val evaluateBuilder = evaluate.foldLeft(EvaluateOnExit.builder()) {
+          case (acc, (k, v)) => (k.toLowerCase, v.toLowerCase) match {
+            case ("action", "retry") => acc.action(RetryAction.RETRY)
+            case ("action", "exit") => acc.action(RetryAction.EXIT)
+            case ("onexitcode", _) => acc.onExitCode(v)
+            case ("onreason", _) => acc.onReason(v)
+            case ("onstatusreason", _) => acc.onStatusReason(v)
+            case _ => acc
+          }
+        }
+        evaluations = evaluations :+ evaluateBuilder.build()
+      }
+    )
+
+    builder = builder.evaluateOnExit(evaluations.asJava)
+
+    (builder,
+     s"${context.runtimeAttributes.awsBatchRetryAttempts.toString}${context.runtimeAttributes.awsBatchEvaluateOnExit.toString}")
   }
 
 
@@ -248,7 +286,8 @@ case class AwsBatchJobDefinitionContext(
             fsxMntPoint: Option[List[String]],
             efsMntPoint: Option[String],
             efsMakeMD5: Option[Boolean],
-            efsDelocalize: Option[Boolean]
+            efsDelocalize: Option[Boolean],
+            tagResources: Option[Boolean]
             ) {
 
   override def toString: String = {
@@ -266,6 +305,7 @@ case class AwsBatchJobDefinitionContext(
       .append("efsMntPoint", efsMntPoint)
       .append("efsMakeMD5", efsMakeMD5)
       .append("efsDelocalize", efsDelocalize)
+      .append("tagResources", tagResources)
       .build
   }
 }

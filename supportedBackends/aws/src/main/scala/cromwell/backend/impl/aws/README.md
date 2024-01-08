@@ -75,6 +75,37 @@ runtime {
 }
 ```
 
+### `awsBatchEvaluteOnExit`
+
+*Default: _[]_* - will always retry 
+
+This runtime attribute sets the `evaluateOnExit` for [*AWS Batch Automated Job Retries*](https://docs.aws.amazon.com/batch/latest/userguide/job_retries.html) and specify the retry condition for a failed job.
+
+This configuration works with `awsBatchRetryAttempts` and is useful if you only want to retry on certain failures. 
+
+For instance, if you will only like to retry during spot termination.
+
+```
+runtime {
+    awsBatchEvaluateOnExit: [
+        {  
+            Action: "RETRY",
+            onStatusReason: "Host EC2*"
+        },
+        {
+            onReason : "*"
+            Action: "EXIT"
+        }
+    ]
+}
+```
+
+For more information on the batch retry strategy, please refer to:
+
+* General Doc: [userguide/job_retries.html](https://docs.aws.amazon.com/batch/latest/userguide/job_retries.html)
+* Blog: [Introducing retry strategies](https://aws.amazon.com/blogs/compute/introducing-retry-strategies-for-aws-batch/)
+
+
 ### `ulimits`
 
 *Default: _empty_*
@@ -109,6 +140,34 @@ Parameter description:
   - The hard limit for the `ulimit` type.
   - Type: Integer
   - Required: Yes, when `ulimits` is used.
+
+### GPU support 
+
+Tasks can request GPU by setting `gpuCount` in the task runtime attribute. For instance:
+```
+task gpu_queue_task {
+    input {
+        ...
+    }
+
+    command <<< 
+        ...
+    >>>
+    output {}
+
+    runtime {
+        queueArn: "arn:aws:batch:us-west-2:12345678910:job-queue/quekx-gpu-queue"
+        docker: "xxxx"
+        maxRetries: 1
+        cpu: "1"
+        gpuCount: 1
+        memory: "2 GB"
+    }
+}
+```
+the gpuCount value will be passed to AWS Batch as part of [resourceRequirements](https://docs.aws.amazon.com/batch/latest/userguide/job_definition_parameters.html#ContainerProperties-resourceRequirements).
+You will need to use this feature in conjunction with a aws queue that has GPU instances (see [compute-environment](/supportedBackends/aws/src/main/scala/cromwell/backend/impl/aws/DEPLOY.md#compute-environment) for more inforamtion)
+
 
 ### Call Caching with ECR private
 
@@ -227,6 +286,7 @@ In the AWS backend those notifications can be send to **SNS Topic** or **EventBr
 #### AWS SNS
 
 1. Create an SNS topic, add the following to your `cromwell.conf` file and replace `topicArn` with the topic's ARN you just created:
+2. By default, all cromwell events will be publish to sns. Set `publishStatusOnly = true` if you only publish events that are `status` updates.
 
 ```
 services {
@@ -241,12 +301,13 @@ services {
                 }]
                 region = "us-east-1"
                 topicArn = "<topicARN>"
+                publishStatusOnly = true
             }
         }
     }
 }
 ```
-2. Add `sns:Publish` IAM policy to your Cromwell server IAM role. 
+3. Add `sns:Publish` IAM policy to your Cromwell server IAM role. 
 
 #### AWS EventBridge
 
@@ -474,7 +535,37 @@ task task_three {
 }
 ```
 
+#### TAGGING RESOURCES
+AWS Batch tags jobs and, if configured in the compute environment, instances and volumes with generic tags to track costs.  These tags typically include the job-queue name. To allow more detailed cost tracking, it is possible to enable tagging instances and connected volumes with the following information : 
 
+- *cromwell-workflow-name* : the top-level name of the submitted WDL (eg "workflow myWorkflow {...}")
+- *cromwell-workflow-id* : the identifier assigned to the workflow inside cromwell (eg "2443daac-c232-4e0a-920d-fbf53273e9c5")
+- *cromwell-task-id* : A string consisting of "<workflowName>.<taskName>-<shardIdx>-<attempt>"
+
+In case the same instance is reused for multiple tasks, unique tag values are concatenated up until a maximal length of 255 characters. For example, an instance used for two identical workflows, might be tagged as followes: 
+
+- cromwell-workflow-name : myWorkflow
+- cromwell-workflow-id : 2443daac-c232-4e0a-920d-fbf53273e9c5;df19029e-cc02-41d5-a26d-8d30c0ab05cb
+- cromwell-task-id : myWorkflow.myTask-None-1
+
+To enable tagging, add "tagResources = true" to the default-runtime-attributes section of your configuration: 
+
+```
+backend {
+    providers {
+        AWSBatch {
+            config{
+                
+                default-runtime-attributes {
+                    // enable detailed tagging
+                    tagResources = true
+                }
+            }
+        }
+    }
+}
+
+```
 
 
 AWS Batch

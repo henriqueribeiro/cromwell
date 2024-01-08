@@ -48,6 +48,8 @@ import wom.format.MemorySize
 import wom.types._
 import wom.values._
 
+import scala.util.{Failure, Success, Try}
+
 class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeoutSpec with Matchers {
 
   def workflowOptionsWithDefaultRA(defaults: Map[String, JsValue]): WorkflowOptions = {
@@ -56,7 +58,7 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     )))
   }
 
-  val expectedDefaults = new AwsBatchRuntimeAttributes(refineMV[Positive](1), Vector("us-east-1a", "us-east-1b"),
+  val expectedDefaults = new AwsBatchRuntimeAttributes(refineMV[Positive](1), 0, Vector("us-east-1a", "us-east-1b"),
 
     MemorySize(2, MemoryUnit.GB), Vector(AwsBatchWorkingDisk()),
     "ubuntu:latest",
@@ -66,9 +68,13 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     false,
     "my-stuff",
     1,
-    Vector(Map.empty[String, String]))
+    Vector(Map.empty[String, String]),
+    Vector(Map.empty[String, String]),
+    false,
+    false
+  )
 
-  val expectedDefaultsLocalFS = new AwsBatchRuntimeAttributes(refineMV[Positive](1), Vector("us-east-1a", "us-east-1b"),
+  val expectedDefaultsLocalFS = new AwsBatchRuntimeAttributes(refineMV[Positive](1), 0, Vector("us-east-1a", "us-east-1b"),
 
     MemorySize(2, MemoryUnit.GB), Vector(AwsBatchWorkingDisk()),
     "ubuntu:latest",
@@ -79,6 +85,9 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     "",
     1,
     Vector(Map.empty[String, String]),
+    Vector(Map.empty[String, String]),
+    false,
+    false,
     "local")
 
   "AwsBatchRuntimeAttributes" should {
@@ -186,9 +195,9 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
       assertAwsBatchRuntimeAttributesSuccessfulCreation(runtimeAttributes, expectedRuntimeAttributes)
     }
     "validate a valid Filesystem string entry local Filesystem" in {
-      val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"),"scriptBucketName" -> WomString(""), "filesystem" -> WomString("local"))
+      val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"), "scriptBucketName" -> WomString(""), "filesystem" -> WomString("local"))
       val expectedRuntimeAttributes = expectedDefaultsLocalFS
-      assertAwsBatchRuntimeAttributesSuccessfulCreation(runtimeAttributes, expectedRuntimeAttributes,WorkflowOptions.fromMap(Map.empty).get,
+      assertAwsBatchRuntimeAttributesSuccessfulCreation(runtimeAttributes, expectedRuntimeAttributes, WorkflowOptions.fromMap(Map.empty).get,
         NonEmptyList.of("us-east-1a", "us-east-1b"), new AwsBatchConfiguration(AwsBatchTestConfigForLocalFS.AwsBatchBackendConfigurationDescriptor))
     }
 
@@ -302,7 +311,7 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     }
 
     "override config default attributes with default attributes declared in workflow options" in {
-      val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"), "scriptBucketName" -> WomString("my-stuff") )
+      val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"), "scriptBucketName" -> WomString("my-stuff"))
 
       val workflowOptionsJson =
         """{
@@ -316,7 +325,7 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     }
 
     "override config default runtime attributes with task runtime attributes" in {
-      val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"), "scriptBucketName" -> WomString("my-stuff"),  "cpu" -> WomInteger(4))
+      val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"), "scriptBucketName" -> WomString("my-stuff"), "cpu" -> WomInteger(4))
 
       val workflowOptionsJson =
         """{
@@ -330,7 +339,7 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     }
 
     "override invalid config default attributes with task runtime attributes" in {
-      val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"),"scriptBucketName" -> WomString("my-stuff"),  "cpu" -> WomInteger(4))
+      val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"), "scriptBucketName" -> WomString("my-stuff"), "cpu" -> WomInteger(4))
 
       val workflowOptionsJson =
         """{
@@ -369,6 +378,89 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
       val expectedRuntimeAttributes = expectedDefaults.copy(awsBatchRetryAttempts = 0)
       assertAwsBatchRuntimeAttributesSuccessfulCreation(runtimeAttributes, expectedRuntimeAttributes)
     }
+
+    "validate a valid awsBatchEvaluateOnExit " in {
+      val runtimeAttributes = Map(
+        "docker" -> WomString("ubuntu:latest"),
+        "awsBatchRetryAttempts" -> WomInteger(0),
+        "scriptBucketName" -> WomString("my-stuff"),
+        "awsBatchEvaluateOnExit" -> WomArray(
+          Seq(WomMap(Map(WomString("action") -> WomString("RETRY"), WomString("onStatusReason") -> WomString("Host EC2*")))
+          )
+        )
+      )
+
+      assertAwsBatchRuntimeAttributesSuccessfulCreation(runtimeAttributes, expectedDefaults.copy(
+        awsBatchRetryAttempts = 0,
+        awsBatchEvaluateOnExit = Vector(Map("action" -> "RETRY", "onStatusReason" -> "Host EC2*"))
+      ))
+    }
+
+    "if awsBatchEvaluteOnExit is empty, do not fail" in {
+      val runtimeAttributes = Map(
+        "docker" -> WomString("ubuntu:latest"),
+        "awsBatchRetryAttempts" -> WomInteger(0),
+        "scriptBucketName" -> WomString("my-stuff"),
+        "awsBatchEvaluateOnExit" -> WomArray(WomArrayType(WomMapType(WomStringType,WomStringType)), Vector(WomMap(Map.empty[WomValue, WomValue])))
+      )
+      assertAwsBatchRuntimeAttributesSuccessfulCreation(runtimeAttributes, expectedDefaults.copy(
+        awsBatchRetryAttempts = 0,
+      ))
+    }
+
+    "missing or invalid action key result in an invalid awsBatchEvaluateOnExit" in {
+      val invalidEvaluateOnExit = List(
+        // missing action key
+        WomArray(
+          Seq(WomMap(Map(WomString("onStatusReason") -> WomString("Host EC2*")))
+          )
+        ),
+        // invalid value
+        WomArray(
+          Seq(WomMap(Map(WomString("action") -> WomString("TRYAGAIN"), WomString("onStatusReason") -> WomString("Host EC2*")))
+          )
+        )
+      )
+
+      invalidEvaluateOnExit foreach { invalidVal =>
+        val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"), "awsBatchEvaluateOnExit" -> invalidVal)
+        assertAwsBatchRuntimeAttributesFailedCreation(runtimeAttributes,
+          "Missing or invalid action key/value for runtime attribute: awsBatchEvaluateOnExit")
+      }
+    }
+  }
+
+  "Unrecognized keys for retry strategy should result in an invalid awsBatchEvaluateOnExit" in {
+    // invalid key
+    val invalidValue = WomArray(
+      Seq(WomMap(Map(WomString("action") -> WomString("RETRY"), WomString("onRandomStatus") -> WomString("Host EC2*")))
+      )
+    )
+    val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"), "awsBatchEvaluateOnExit" -> invalidValue)
+    assertAwsBatchRuntimeAttributesFailedCreation(runtimeAttributes,
+      s"""Invalid keys in awsBatchEvaluateOnExit runtime attribute: Set(onrandomstatus).
+         | Only Set(action, onExitCode, onReason, onStatusReason) are accepted.""".stripMargin.replace(
+        "\n", ""))
+  }
+
+  "Config with defined awsBatchEvaluateOnExit works" in {
+    val runtimeAttributes = Map("docker" -> WomString("ubuntu:latest"), "scriptBucketName" -> WomString("my-stuff"),
+    )
+    val batchConfig = new AwsBatchConfiguration(AwsBatchTestWithRetryConfig.AwsBatchBackendConfigurationDescriptor)
+    val workflowOptions = WorkflowOptions.fromMap(Map.empty).get
+    val expectedRuntimeAttributes = expectedDefaults.copy(
+      awsBatchEvaluateOnExit = Vector(
+        Map("Action" -> "RETRY", "onStatusReason" -> "Host EC2*"), Map("Action" -> "EXIT", "onReason" -> "*"))
+    )
+
+    val runtimeAttributesBuilder = AwsBatchRuntimeAttributes.runtimeAttributesBuilder(batchConfig)
+    val defaultedAttributes = RuntimeAttributeDefinition.addDefaultsToAttributes(
+      AwsBatchRuntimeAttributes.runtimeAttributesBuilder(batchConfig).definitions.toSet, workflowOptions)(runtimeAttributes)
+
+    val validatedRuntimeAttributes = runtimeAttributesBuilder.build(defaultedAttributes, NOPLogger.NOP_LOGGER)
+    val actualRuntimeAttributes = AwsBatchRuntimeAttributes(
+      validatedRuntimeAttributes, batchConfig.runtimeConfig, batchConfig.fileSystem)
+    assert(actualRuntimeAttributes == expectedRuntimeAttributes)
   }
 
   private def assertAwsBatchRuntimeAttributesSuccessfulCreation(runtimeAttributes: Map[String, WomValue],
@@ -388,11 +480,10 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
   private def assertAwsBatchRuntimeAttributesFailedCreation(runtimeAttributes: Map[String, WomValue],
                                                        exMsg: String,
                                                        workflowOptions: WorkflowOptions = emptyWorkflowOptions): Unit = {
-    try {
-      toAwsBatchRuntimeAttributes(runtimeAttributes, workflowOptions, configuration)
-      fail(s"A RuntimeException was expected with message: $exMsg")
-    } catch {
-      case ex: RuntimeException => assert(ex.getMessage.contains(exMsg))
+
+    Try(toAwsBatchRuntimeAttributes(runtimeAttributes, workflowOptions, configuration)) match {
+      case Failure(exception) => assert(exception.getMessage.contains(exMsg))
+      case Success(_) => fail(s"A RuntimeException was expected with message: $exMsg")
     }
     ()
   }

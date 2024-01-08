@@ -61,6 +61,7 @@ case class AwsBatchAttributes(fileSystem: String,
                               fsxMntPoint: Option[List[String]],
                               efsMntPoint: Option[String],
                               efsMakeMD5: Option[Boolean],
+                              tagResources: Option[Boolean],
                               efsDelocalize: Option[Boolean],
                               globLinkCommand: Option[String],
                               checkSiblingMd5: Option[Boolean]
@@ -87,9 +88,13 @@ object AwsBatchAttributes {
     "numSubmitAttempts",
     "default-runtime-attributes.scriptBucketName",
     "awsBatchRetryAttempts",
+    "awsBatchEvaluateOnExit",
     "ulimits",
+    "gpuCount",
     "efsDelocalize",
     "efsMakeMD5",
+    "tagResources",
+    "maxRetries",
     "glob-link-command"
   )
 
@@ -180,6 +185,13 @@ object AwsBatchAttributes {
             case false => None
       }
     }
+    // from config if set: 
+    val tagResources:ErrorOr[Option[Boolean]] = validate {
+        backendConfig.hasPath("default-runtime-attributes.tagResources") match {
+            case true => Some(backendConfig.getBoolean("default-runtime-attributes.tagResources"))
+            case false => None
+      }
+    }
     // from config if set.
     val globLinkCommand:ErrorOr[Option[String]] = validate {
         backendConfig.hasPath("glob-link-command") match {
@@ -206,6 +218,7 @@ object AwsBatchAttributes {
       efsMntPoint,
       efsMakeMD5,
       efsDelocalize,
+      tagResources,
       globLinkCommand,
       checkSiblingMd5
     ).tupled.map((AwsBatchAttributes.apply _).tupled) match {
