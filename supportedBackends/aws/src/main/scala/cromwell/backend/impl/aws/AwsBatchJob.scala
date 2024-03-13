@@ -693,7 +693,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       }
       val jobDefinitionContext = AwsBatchJobDefinitionContext(
         runtimeAttributes = runtimeAttributes,
-        shellExecutable = 
+        jobShell = jobShell,
         commandText = commandStr,
         dockerRcPath = dockerRc,
         dockerStdoutPath = dockerStdout,
@@ -842,6 +842,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
       .append("jobDescriptor", jobDescriptor)
       .append("runtimeAttributes", runtimeAttributes)
+      .append("jobShell", jobShell)
       .append("commandLine", commandLine)
       .append("commandScript", commandScript)
       .append("dockerRc", dockerRc).append("dockerStderr", dockerStderr).append("dockerStdout", dockerStdout)
