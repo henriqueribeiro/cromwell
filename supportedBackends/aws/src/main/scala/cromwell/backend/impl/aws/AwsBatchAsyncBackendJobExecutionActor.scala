@@ -191,6 +191,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     AwsBatchJob(
       jobDescriptor,
       runtimeAttributes,
+      jobShell
       instantiatedCommand.commandString,
       cmdScript,
       rcPath.toString, executionStdout, executionStderr,
