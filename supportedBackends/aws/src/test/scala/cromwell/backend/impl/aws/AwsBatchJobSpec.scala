@@ -130,7 +130,7 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
 
   val batchJobDefintion = AwsBatchJobDefinitionContext(
     runtimeAttributes = runtimeAttributes,
-    shellExecutable = "", commandText = "", dockerRcPath = "", dockerStdoutPath = "", dockerStderrPath = ""
+    jobShell = "", commandText = "", dockerRcPath = "", dockerStdoutPath = "", dockerStderrPath = ""
     , jobDescriptor = jobDescriptor, jobPaths = jobPaths, inputs = Set(), outputs = Set(), fsxMntPoint = None, None, None, None
 
   )

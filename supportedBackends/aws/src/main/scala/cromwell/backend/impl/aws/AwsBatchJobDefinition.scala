@@ -275,7 +275,7 @@ object AwsBatchJobDefinitionContext
 
 case class AwsBatchJobDefinitionContext(
             runtimeAttributes: AwsBatchRuntimeAttributes,
-            shellExecutable: String,
+            jobShell: String,
             commandText: String,
             dockerRcPath: String,
             dockerStdoutPath: String,
@@ -294,7 +294,7 @@ case class AwsBatchJobDefinitionContext(
   override def toString: String = {
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
       .append("runtimeAttributes", runtimeAttributes)
-      .append("shellExecutable", shellExecutable)
+      .append("jobShell", jobShell)
       .append("commandText", commandText)
       .append("dockerRcPath", dockerRcPath)
       .append("dockerStderrPath",dockerStderrPath)
