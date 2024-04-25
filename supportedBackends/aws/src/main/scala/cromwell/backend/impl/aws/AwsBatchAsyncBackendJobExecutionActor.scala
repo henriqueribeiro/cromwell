@@ -551,7 +551,13 @@ class AwsBatchAsyncBackendJobExecutionActor(
     // add workflow id to hash for better conflict prevention
     val wfid = standardParams.jobDescriptor.toString.split(":")(0)
     val globName = GlobFunctions.globName(s"${womFile.value}-${wfid}")
-    val globbedDir = Paths.get(womFile.value).getParent.toString
+    var globbedDirPath =
+      Paths.get(womFile.value).getParent()
+    while (globbedDirPath.toString().contains("*")) {
+      globbedDirPath = globbedDirPath.getParent()
+    }
+    val globbedDir: String = globbedDirPath.toString()
+
     // generalize folder and list file
     val globDirectory =
       DefaultPathBuilder.get(globbedDir + "/." + globName + "/")
@@ -1176,25 +1182,12 @@ class AwsBatchAsyncBackendJobExecutionActor(
     *   The shell scripting.
     */
   override def globScript(globFile: WomGlobFile): String = {
-    val (globDirectory, globList) =
-      if (
-        configuration.efsMntPoint.isDefined && globDirectory.startsWith(
-          configuration.efsMntPoint.getOrElse("")
-        )
-      ) {
-        val (globName, globbedDir, _, _, _) = generateGlobPaths(globFile)
-        (
-          globbedDir + "/." + globName + "/",
-          globbedDir + "/." + globName + ".list"
-        )
-      } else {
-        val parentDirectory = globParentDirectory(globFile)
-        val globDir = GlobFunctions.globName(globFile.value)
-        (parentDirectory./(globDir), parentDirectory./(s"$globDir.list"))
-      }
+    val (globName, globbedDir, _, _, _) = generateGlobPaths(globFile)
     val controlFileName = "cromwell_glob_control_file"
     val absoluteGlobValue =
       commandDirectory.resolve(globFile.value).pathAsString
+    val globDirectory = globbedDir + "/." + globName + "/"
+    val globList = globbedDir + "/." + globName + ".list"
     val globLinkCommand: String =
       (if (configuration.globLinkCommand.isDefined) {
          "( " + configuration.globLinkCommand.getOrElse("").toString + " )"
