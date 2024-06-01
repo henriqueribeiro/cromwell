@@ -138,7 +138,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
 
       case input: AwsBatchFileInput if input.s3key.startsWith("s3://") => 
         // regular s3 objects : download to working dir.
-        s"""_s3_localize_with_retry "${input.s3key}" "${input.mount.mountPoint.pathAsString}/${input.local}" """.stripMargin
+        s"""_s3_localize_with_retry "${input.s3key}" "${input.mount.mountPoint.pathAsString}/${input.local}"""".stripMargin
           .replace(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
 
       case input: AwsBatchFileInput if efsMntPoint.isDefined && input.s3key.startsWith(efsMntPoint.get) =>  
@@ -170,6 +170,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     
     val workflowId = invalidCharsPattern.replaceAllIn(jobDescriptor.workflowDescriptor.rootWorkflowId.toString,"_")
     val workflowName = invalidCharsPattern.replaceAllIn(jobDescriptor.workflowDescriptor.rootWorkflow.name.toString,"_")
+
     val taskId = invalidCharsPattern.replaceAllIn(jobDescriptor.key.call.fullyQualifiedName + "-" + jobDescriptor.key.index + "-" + jobDescriptor.key.attempt,"_")
     val doTagging = tagResources.getOrElse(false) // development : always tag resources.
     //val tags: Map[String,String] = Map("cromwell-workflow-name" -> workflowName, "cromwell-workflow-id" -> workflowId, "cromwell-task-id" -> taskId)
@@ -202,7 +203,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |    $awsCmd s3 cp --no-progress "$$s3_path" "$$destination"  ||
          |        { echo "attempt $$i to copy $$s3_path failed" && sleep $$((7 * "$$i")) && continue; }
          |    # check data integrity
-         |    _check_data_integrity "$$destination" "$$s3_path" || 
+         |    _check_data_integrity "$$destination" "$$s3_path" ||
          |       { echo "data content length difference detected in attempt $$i to copy $$local_path failed" && sleep $$((7 * "$$i")) && continue; }
          |    # copy succeeded
          |    break
@@ -239,7 +240,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |        break
          |    fi
          |    # if destination is not a bucket : abort
-         |    if ! [[ "$$destination" =~ s3://([^/]+)/(.+) ]]; then 
+         |    if ! [[ "$$destination" =~ s3://([^/]+)/(.+) ]]; then
          |     echo "$$destination is not an S3 path with a bucket and key."
          |      DELOCALIZATION_FAILED=1
          |      break
@@ -249,21 +250,21 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |       # make sure to strip the trailing / in destination
          |       destination=$${destination%/}
          |       # glob directory. do recursive copy
-         |       $awsCmd s3 cp --no-progress "$$local_path" "$$destination" --recursive --exclude "cromwell_glob_control_file" || 
-         |         { echo "attempt $$i to copy globDir $$local_path failed" && sleep $$((7 * "$$i")) && continue; } 
+         |       $awsCmd s3 cp --no-progress "$$local_path" "$$destination" --recursive --exclude "cromwell_glob_control_file" ||
+         |         { echo "attempt $$i to copy globDir $$local_path failed" && sleep $$((7 * "$$i")) && continue; }
          |       # check integrity for each of the files (allow spaces)
          |       SAVEIFS="$$IFS"
          |       IFS=$$'\n'
          |       for FILE in $$(cd "$$local_path" ; ls | grep -v cromwell_glob_control_file); do
-         |           _check_data_integrity "$$local_path/$$FILE" "$$destination/$$FILE" || 
+         |           _check_data_integrity "$$local_path/$$FILE" "$$destination/$$FILE" ||
          |               { echo "data content length difference detected in attempt $$i to copy $$local_path/$$FILE failed" && sleep $$((7 * "$$i")) && continue 2; }
          |       done
          |       IFS="$$SAVEIFS"
-         |    else 
-         |      $awsCmd s3 cp --no-progress "$$local_path" "$$destination" || 
-         |         { echo "attempt $$i to copy $$local_path failed" && sleep $$((7 * "$$i")) && continue; } 
+         |    else
+         |      $awsCmd s3 cp --no-progress "$$local_path" "$$destination" ||
+         |         { echo "attempt $$i to copy $$local_path failed" && sleep $$((7 * "$$i")) && continue; }
          |      # check content length for data integrity
-         |      _check_data_integrity "$$local_path" "$$destination" || 
+         |      _check_data_integrity "$$local_path" "$$destination" ||
          |         { echo "data content length difference detected in attempt $$i to copy $$local_path failed" && sleep $$((7 * "$$i")) && continue; }
          |    fi
          |    # copy succeeded
@@ -274,7 +275,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |function _get_multipart_chunk_size() {
          |  local file_path="$$1"
          |  # file size
-         |  file_size=$$(stat --printf="%s" "$$file_path") 
+         |  file_size=$$(stat --printf="%s" "$$file_path")
          |  # chunk_size : you can have at most 10K parts with at least one 5MB part
          |  # this reflects the formula in s3-copy commands of cromwell (S3FileSystemProvider.java)
          |  #   => long partSize = Math.max((objectSize / 10000L) + 1, 5 * 1024 * 1024);
@@ -287,9 +288,9 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |function _check_data_integrity() {
          |  local local_path="$$1"
          |  local s3_path="$$2"
-         |  
+         |
          |  # remote : use content_length
-         |  if [[ "$$s3_path" =~ s3://([^/]+)/(.+) ]]; then 
+         |  if [[ "$$s3_path" =~ s3://([^/]+)/(.+) ]]; then
          |        bucket="$${BASH_REMATCH[1]}"
          |        key="$${BASH_REMATCH[2]}"
          |  else
@@ -356,7 +357,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |if [[ "${doTagging}" == "true" ]]; then
          |  echo "*** TAGGING RESOURCES ***"
          |  _add_tags
-         |fi 
+         |fi
          |
          |echo '*** LOCALIZING INPUTS ***'
          |if [ ! -d $workDir ]; then mkdir $workDir && chmod 777 $workDir; fi
@@ -367,7 +368,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |if [[ $$LOCALIZATION_FAILED -eq 1 ]]; then
          |  echo '*** LOCALIZATION FAILED ***'
          |  exit 1
-         |else 
+         |else
          |  echo '*** COMPLETED LOCALIZATION ***'
          |fi
          |set +e
@@ -451,7 +452,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       case output: AwsBatchFileOutput if output.s3key.startsWith("s3://") && output.mount.mountPoint.pathAsString == AwsBatchWorkingDisk.MountPoint.pathAsString =>
         //output is on working disk mount
         Log.debug("output Data on working disk mount" + output.local.pathAsString)
-        s"""_s3_delocalize_with_retry "$workDir/${output.local.pathAsString}" "${output.s3key}" """.stripMargin
+        s"""_s3_delocalize_with_retry "$workDir/${output.local.pathAsString}" "${output.s3key}"""".stripMargin
 
       // file(name (full path), s3key (delocalized path), local (file basename), mount (disk details))
       // files on EFS mounts are optionally delocalized.
@@ -489,7 +490,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
         //output on a different mount
         Log.debug("output data on other mount")
         Log.debug(output.toString)
-        s"""_s3_delocalize_with_retry "${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}" "${output.s3key}" """.stripMargin
+        s"""_s3_delocalize_with_retry "${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}" "${output.s3key}"""".stripMargin
       case _ => ""
     }.mkString("\n") + "\n" +
       s"""
@@ -508,7 +509,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |if [[ "${doTagging}" == "true" ]]; then
          |  echo "*** TAGGING RESOURCES ***"
          |  _add_tags
-         |fi 
+         |fi
          |
          |echo '*** DELOCALIZING OUTPUTS ***'
          |DELOCALIZATION_FAILED=0
