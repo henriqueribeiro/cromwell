@@ -71,7 +71,8 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     Vector(Map.empty[String, String]),
     Vector(Map.empty[String, String]),
     false,
-    false
+    false,
+    sharedMemorySize = refineMV[Positive](64)
   )
 
   val expectedDefaultsLocalFS = new AwsBatchRuntimeAttributes(refineMV[Positive](1), 0, Vector("us-east-1a", "us-east-1b"),
@@ -88,6 +89,7 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     Vector(Map.empty[String, String]),
     false,
     false,
+    refineMV[Positive](64),
     "local")
 
   "AwsBatchRuntimeAttributes" should {
@@ -405,6 +407,17 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
       )
       assertAwsBatchRuntimeAttributesSuccessfulCreation(runtimeAttributes, expectedDefaults.copy(
         awsBatchRetryAttempts = 0,
+      ))
+    }
+
+    "if sharedMemorySize is set" in {
+      val runtimeAttributes = Map(
+        "docker" -> WomString("ubuntu:latest"),
+        "scriptBucketName" -> WomString("my-stuff"),
+        "sharedMemorySize" -> WomInteger(10)
+      )
+      assertAwsBatchRuntimeAttributesSuccessfulCreation(runtimeAttributes, expectedDefaults.copy(
+        sharedMemorySize = refineMV[Positive](10)
       ))
     }
 

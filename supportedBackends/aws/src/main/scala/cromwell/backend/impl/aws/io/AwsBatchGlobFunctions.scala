@@ -34,8 +34,9 @@ package cromwell.backend.impl.aws.io
 import wom.values._
 import cromwell.backend.io._
 import cromwell.backend.standard._
+
 import scala.concurrent.Future
-import java.nio.file.Paths
+import java.nio.file.{Path, Paths}
 import cromwell.core.path.DefaultPathBuilder
 
 
@@ -67,7 +68,10 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
     val wfid_regex = ".{8}-.{4}-.{4}-.{4}-.{12}".r
     val wfid = callContext.root.toString.split("/").toList.filter(element => wfid_regex.pattern.matcher(element).matches()).lastOption.getOrElse("")
     val globPatternName = globName(s"${pattern}-${wfid}")
-    val globbedDir = Paths.get(pattern).getParent.toString
+    val globbedDir = Paths.get(pattern).getParent match {
+      case x: Path => x.toString
+      case _  => "./"
+    }
     val listFilePath = if (pattern.startsWith("/mnt/efs/")) {
         DefaultPathBuilder.get(globbedDir + "/." + globPatternName + ".list")
     } else {

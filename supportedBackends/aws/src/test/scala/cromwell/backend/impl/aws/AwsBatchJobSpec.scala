@@ -42,11 +42,12 @@ import cromwell.util.SampleWdl
 import eu.timepit.refined.api.Refined
 import eu.timepit.refined.auto._
 import eu.timepit.refined.numeric._
+import eu.timepit.refined.refineMV
 import org.scalatest.PrivateMethodTester
 import org.scalatest.flatspec.AnyFlatSpecLike
 import org.scalatest.matchers.should.Matchers
 import software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider
-import software.amazon.awssdk.services.batch.model.{ContainerDetail, EvaluateOnExit, JobDetail, KeyValuePair, ResourceRequirement, RetryAction, RetryStrategy}
+import software.amazon.awssdk.services.batch.model.{ContainerDetail, EvaluateOnExit, JobDetail, KeyValuePair, LinuxParameters, ResourceRequirement, RetryAction, RetryStrategy}
 import spray.json.{JsObject, JsString}
 import wdl4s.parser.MemoryUnit
 import wom.format.MemorySize
@@ -109,6 +110,7 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
   val s3Outputs: Set[AwsBatchFileOutput] = Set(AwsBatchFileOutput("baa", "s3://bucket/somewhere/baa", DefaultPathBuilder.get("baa"), AwsBatchWorkingDisk()))
 
   val cpu: Int Refined Positive = 2
+  val sharedMemorySize: Int Refined Positive = 64
   val runtimeAttributes: AwsBatchRuntimeAttributes = new AwsBatchRuntimeAttributes(
       cpu = cpu,
       gpuCount = 0,
@@ -126,7 +128,9 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
       ulimits = Vector(Map.empty[String, String]),
       efsDelocalize = false,
       efsMakeMD5 = false,
-      fileSystem = "s3")
+      fileSystem = "s3",
+      sharedMemorySize = sharedMemorySize
+  )
 
   val batchJobDefintion = AwsBatchJobDefinitionContext(
     runtimeAttributes = runtimeAttributes,
@@ -477,5 +481,25 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
 
     val jobDefinition = StandardAwsBatchJobDefinitionBuilder.build(batchJobDefintion.copy(runtimeAttributes = runtime))
     val actual = jobDefinition.containerProperties.resourceRequirements
-    expected should equal(CollectionConverters.asScala(actual).toSeq)}
+    expected should equal(CollectionConverters.asScala(actual).toSeq)
+  }
+
+  it should "use default shared memory size of 64MB" in {
+    val jobDefinition = StandardAwsBatchJobDefinitionBuilder.build(batchJobDefintion)
+    val actual = jobDefinition.containerProperties.linuxParameters()
+    val expected = LinuxParameters.builder().sharedMemorySize(64).build()
+    expected should equal(actual)
+  }
+
+  it should "use user shared memory size if set" in {
+    val runtime = runtimeAttributes.copy(
+      gpuCount = 1,
+      sharedMemorySize = refineMV[Positive](100)
+    )
+    val jobDefinition = StandardAwsBatchJobDefinitionBuilder.build(batchJobDefintion.copy(runtimeAttributes = runtime))
+    val actual = jobDefinition.containerProperties.linuxParameters()
+    val expected = LinuxParameters.builder().sharedMemorySize(100).build()
+    expected should equal(actual)
+  }
+
 }
