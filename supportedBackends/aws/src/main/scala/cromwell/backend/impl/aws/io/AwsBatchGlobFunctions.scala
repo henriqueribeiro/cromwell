@@ -69,8 +69,9 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
     val wfid = callContext.root.toString.split("/").toList.filter(element => wfid_regex.pattern.matcher(element).matches()).lastOption.getOrElse("")
     val globPatternName = globName(s"${pattern}-${wfid}")
     val globbedDir = Paths.get(pattern).getParent match {
-      case x: Path => x.toString
-      case _  => "./"
+      // remove "./" to avoid it from appearing in s3 path
+      case x: Path => x.toString.stripPrefix("./")
+      case _  => ""
     }
     val listFilePath = if (pattern.startsWith("/mnt/efs/")) {
         DefaultPathBuilder.get(globbedDir + "/." + globPatternName + ".list")
@@ -81,9 +82,9 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
       lines.toList map { fileName =>
         // again : this should be config based...
         if (pattern.startsWith("/mnt/efs/")) {
-            s"${globbedDir}/.${globPatternName}/${fileName}"
+            s"${globbedDir}/.${globPatternName}/${fileName}".stripPrefix("/")
         } else {
-            callContext.root.resolve(s"${globbedDir}/.${globPatternName}/${fileName}".stripPrefix("/")).pathAsString
+            callContext.root.resolve(s"${globbedDir}/.${globPatternName}/${fileName}".stripPrefix("/")).pathAsString.stripPrefix("/")
         }
       }
     }

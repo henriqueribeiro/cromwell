@@ -428,12 +428,14 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     val wfid = standardParams.jobDescriptor.toString.split(":")(0)
     val globName = GlobFunctions.globName(s"${womFile.value}-${wfid}")
     val globbedDir = Paths.get(womFile.value).getParent match {
-      case path: Path => path.toString
-      case _ => "./"
+      // remove ./ so it does not appear on s3 path
+      case path: Path => path.toString.stripPrefix("./")
+      case _ => ""
     }
     // generalize folder and list file
-    val globDirectory = DefaultPathBuilder.get(globbedDir + "/." + globName + "/")
-    val globListFile = DefaultPathBuilder.get(globbedDir + "/." + globName + ".list")
+    val globDirPrefix = s"${globbedDir}/.${globName}".stripPrefix("/");
+    val globDirectory = DefaultPathBuilder.get(globDirPrefix + "/")
+    val globListFile = DefaultPathBuilder.get(globDirPrefix +  ".list")
 
     // locate the disk where the globbed data resides
     val (_, globDirectoryDisk) = relativePathAndVolume(womFile.value, runtimeAttributes.disks)
@@ -461,14 +463,14 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   private def generateAwsBatchGlobFileOutputs(womFile: WomGlobFile): List[AwsBatchFileOutput] = {
     
     val (globName, globbedDir, globDirectoryDisk, globDirectoryDestinationPath, globListFileDestinationPath) = generateGlobPaths(womFile)
-    val (relpathDir,_) = relativePathAndVolume(DefaultPathBuilder.get(globbedDir + "/." + globName + "/" + "*").toString,runtimeAttributes.disks)
-    val (relpathList,_) = relativePathAndVolume(DefaultPathBuilder.get(globbedDir + "/." + globName + ".list").toString,runtimeAttributes.disks)
+    val (relpathDir,_) = relativePathAndVolume(DefaultPathBuilder.get(globbedDir + "/." + globName + "/" + "*").toString.stripPrefix("/"),runtimeAttributes.disks)
+    val (relpathList,_) = relativePathAndVolume(DefaultPathBuilder.get(globbedDir + "/." + globName + ".list").toString.stripPrefix("/"),runtimeAttributes.disks)
     // We need both the glob directory and the glob list:
     List(
       // The glob directory:.
-      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + "/" + "*").toString,globDirectoryDestinationPath, relpathDir, globDirectoryDisk),
+      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + "/" + "*").toString.stripPrefix("/"),globDirectoryDestinationPath, relpathDir, globDirectoryDisk),
       // The glob list file:
-      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + ".list").toString, globListFileDestinationPath, relpathList, globDirectoryDisk)
+      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + ".list").toString.stripPrefix("/"), globListFileDestinationPath, relpathList, globDirectoryDisk)
     )
   }
 
@@ -865,8 +867,8 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     val (globName, globbedDir, _, _, _) = generateGlobPaths(globFile) 
     val controlFileName = "cromwell_glob_control_file"
     val absoluteGlobValue = commandDirectory.resolve(globFile.value).pathAsString
-    val globDirectory = globbedDir + "/." + globName + "/"
-    val globList = globbedDir + "/." + globName + ".list"
+    val globDirectory = (globbedDir + "/." + globName + "/").stripPrefix("/")
+    val globList = (globbedDir + "/." + globName + ".list").stripPrefix("/")
     val globLinkCommand: String = (if (configuration.globLinkCommand.isDefined) {
        "( " + configuration.globLinkCommand.getOrElse("").toString + " )"
 
