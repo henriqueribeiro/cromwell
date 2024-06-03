@@ -34,25 +34,19 @@ package cromwell.backend.impl.aws
 import java.net.{SocketTimeoutException, URLDecoder}
 import java.io.FileNotFoundException
 import java.nio.file.Paths
-
 import akka.actor.ActorRef
 import akka.pattern.AskSupport
 import akka.util.Timeout
-
-import cats.implicits._
-
 import common.exception.MessageAggregation
 import common.collections.EnhancedCollections._
 import common.util.StringUtil._
 import common.validation.Validation._
-
 import cromwell.backend._
-import cromwell.backend.async._ 
+import cromwell.backend.async._
 import cromwell.backend.impl.aws.IntervalLimitedAwsJobSubmitActor.SubmitAwsJobRequest
 import cromwell.backend.impl.aws.OccasionalStatusPollingActor.{NotifyOfStatus, WhatsMyStatus}
 import cromwell.backend.impl.aws.RunStatus.{Initializing, TerminalRunStatus}
 import cromwell.backend.impl.aws.io._
-
 import cromwell.backend.io.DirectoryFunctions
 import cromwell.backend.io.JobPaths
 import cromwell.backend.standard.{StandardAsyncExecutionActor, StandardAsyncExecutionActorParams, StandardAsyncJob}
@@ -61,16 +55,12 @@ import cromwell.core._
 import cromwell.core.path.{DefaultPathBuilder, Path, PathBuilder, PathFactory}
 import cromwell.core.io.{DefaultIoCommandBuilder, IoCommandBuilder}
 import cromwell.core.retry.SimpleExponentialBackoff
-
 import cromwell.filesystems.s3.S3Path
 import cromwell.filesystems.s3.batch.S3BatchCommandBuilder
-
 import cromwell.services.keyvalue.KvClient
-
 import org.slf4j.{Logger, LoggerFactory}
 import software.amazon.awssdk.services.batch.BatchClient
 import software.amazon.awssdk.services.batch.model._
-
 import wom.callable.Callable.OutputDefinition
 import wom.core.FullyQualifiedName
 import wom.expression.NoIoFunctionSet
@@ -81,7 +71,7 @@ import scala.concurrent._
 import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.util.control.NoStackTrace
-import scala.util.{Success, Try, Failure}
+import scala.util.{Failure, Success, Try}
 
 /**
   * The `AwsBatchAsyncBackendJobExecutionActor` creates and manages a job. The job itself is encapsulated by the
@@ -437,7 +427,10 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     // add workflow id to hash for better conflict prevention
     val wfid = standardParams.jobDescriptor.toString.split(":")(0)
     val globName = GlobFunctions.globName(s"${womFile.value}-${wfid}")
-    val globbedDir = Paths.get(womFile.value).getParent.toString
+    val globbedDir = Paths.get(womFile.value).getParent match {
+      case path: Path => path.toString
+      case _ => "./"
+    }
     // generalize folder and list file
     val globDirectory = DefaultPathBuilder.get(globbedDir + "/." + globName + "/")
     val globListFile = DefaultPathBuilder.get(globbedDir + "/." + globName + ".list")
