@@ -57,7 +57,7 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
   override def glob(pattern: String): Future[Seq[String]] = {
     // get access to globName()
     import GlobFunctions._
-    
+
     // GOAL : 
     //  - get config (backend / runtime / ...) here to evaluate if efsMntPoint is set & if efs delocalization is set. 
     //  - according to those values : write the pattern as s3:// or as local path. 
@@ -70,24 +70,23 @@ trait AwsBatchGlobFunctions extends GlobFunctions {
     val globPatternName = globName(s"${pattern}-${wfid}")
     val globbedDir = Paths.get(pattern).getParent match {
       // remove "./" to avoid it from appearing in s3 path
-      case x: Path => x.toString.stripPrefix("./")
-      case _  => ""
+      case x: Path => x.toString.stripPrefix(".")
+      case _ => ""
     }
     val listFilePath = if (pattern.startsWith("/mnt/efs/")) {
-        DefaultPathBuilder.get(globbedDir + "/." + globPatternName + ".list")
+      DefaultPathBuilder.get(globbedDir + "/." + globPatternName + ".list")
     } else {
-        callContext.root.resolve(s"${globbedDir}/.${globPatternName}.list".stripPrefix("/"))
+      callContext.root.resolve(s"${globbedDir}/.${globPatternName}.list".stripPrefix("/"))
     }
     asyncIo.readLinesAsync(listFilePath.toRealPath()) map { lines =>
       lines.toList map { fileName =>
         // again : this should be config based...
         if (pattern.startsWith("/mnt/efs/")) {
-            s"${globbedDir}/.${globPatternName}/${fileName}".stripPrefix("/")
+          s"${globbedDir}/.${globPatternName}/${fileName}".stripPrefix("/")
         } else {
-            callContext.root.resolve(s"${globbedDir}/.${globPatternName}/${fileName}".stripPrefix("/")).pathAsString.stripPrefix("/")
+          callContext.root.resolve(s"${globbedDir}/.${globPatternName}/${fileName}".stripPrefix("/")).pathAsString.stripPrefix("/")
         }
       }
     }
   }
-  
 }

@@ -153,8 +153,8 @@ trait AwsBatchJobDefinitionBuilder {
       ).toList
     }
 
-    def buildName(imageName: String, packedCommand: String, volumes: List[Volume], mountPoints: List[MountPoint], env: Seq[KeyValuePair], ulimits: List[Ulimit], efsDelocalize: Boolean, efsMakeMD5: Boolean, tagResources: Boolean): String = {
-      s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}:${tagResources.toString}"
+    def buildName(imageName: String, packedCommand: String, volumes: List[Volume], mountPoints: List[MountPoint], env: Seq[KeyValuePair], ulimits: List[Ulimit], efsDelocalize: Boolean, efsMakeMD5: Boolean, tagResources: Boolean, sharedMemorySize: Int): String = {
+      s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}:${tagResources.toString}:${sharedMemorySize.toString}"
     }
 
     val environment = List.empty[KeyValuePair]
@@ -179,7 +179,8 @@ trait AwsBatchJobDefinitionBuilder {
       ulimits,
       efsDelocalize,
       efsMakeMD5,
-      tagResources
+      tagResources,
+      context.runtimeAttributes.sharedMemorySize.value
     )
 
     // To reuse job definition for gpu and gpu-runs, we will create a job definition that does not gpu requirements

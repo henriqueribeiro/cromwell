@@ -74,6 +74,7 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
                  |  cd /cromwell_root
                  |
                  |
+                 |
                  |  echo "Hello World! Welcome to Cromwell . . . on AWS!" >&2
                  |)  > '/cromwell_root/hello-stdout.log' 2> '/cromwell_root/hello-stderr.log'
                  |echo $? > /cromwell_root/hello-rc.txt.tmp
