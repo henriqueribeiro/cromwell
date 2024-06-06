@@ -482,6 +482,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
         }
         // return combined result
         s"""
+          | #   changes made
           |${test_cmd}
           |${md5_cmd}
           | """.stripMargin
@@ -494,6 +495,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       case _ => ""
     }.mkString("\n") + "\n" +
       s"""
+         | # there hsould be some change here
          |if [ -f "$workDir/${jobPaths.returnCodeFilename}" ]; then _s3_delocalize_with_retry "$workDir/${jobPaths.returnCodeFilename}" "${jobPaths.callRoot.pathAsString}/${jobPaths.returnCodeFilename}" ; fi
          |if [ -f "$stdErr" ]; then _s3_delocalize_with_retry "$stdErr" "${jobPaths.standardPaths.error.pathAsString}"; fi
          |if [ -f "$stdOut" ]; then _s3_delocalize_with_retry "$stdOut" "${jobPaths.standardPaths.output.pathAsString}"; fi
