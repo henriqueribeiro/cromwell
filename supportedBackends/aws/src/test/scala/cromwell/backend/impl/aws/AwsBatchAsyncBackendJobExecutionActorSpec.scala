@@ -452,7 +452,7 @@ class AwsBatchAsyncBackendJobExecutionActorSpec extends TestKitSuite
       case Right(womExecutable) =>
         val wdlInputs = womExecutable.resolvedExecutableInputs.flatMap({case (port, v) => v.select[WomValue] map { port -> _ }})
 
-        val workflowDescriptor = BackendWorkflo'''wDescriptor(
+        val workflowDescriptor = BackendWorkflowDescriptor(
           WorkflowId.randomId(),
           womWorkflow,
           wdlInputs,

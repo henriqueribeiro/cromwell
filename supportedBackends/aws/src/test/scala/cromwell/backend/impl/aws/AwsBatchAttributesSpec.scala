@@ -39,6 +39,7 @@ import cromwell.core.Tags._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+s
 class AwsBatchAttributesSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matchers {
 
   import AwsBatchTestConfig._
