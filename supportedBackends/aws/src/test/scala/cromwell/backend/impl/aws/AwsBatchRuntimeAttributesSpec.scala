@@ -58,8 +58,10 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     )))
   }
 
-  val expectedDefaults = new AwsBatchRuntimeAttributes(refineMV[Positive](1), 0, Vector("us-east-1a", "us-east-1b"),
-
+  val expectedDefaults = new AwsBatchRuntimeAttributes(
+    refineMV[Positive](1),
+    0,
+    Vector("us-east-1a", "us-east-1b"),
     MemorySize(2, MemoryUnit.GB), Vector(AwsBatchWorkingDisk()),
     "ubuntu:latest",
     "arn:aws:batch:us-east-1:111222333444:job-queue/job-queue",
@@ -71,7 +73,9 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     Vector(Map.empty[String, String]),
     Vector(Map.empty[String, String]),
     false,
-    false
+    false,
+    "/Cromwell/job/",
+    Map("tag1" -> "value1")
   )
 
   val expectedDefaultsLocalFS = new AwsBatchRuntimeAttributes(refineMV[Positive](1), 0, Vector("us-east-1a", "us-east-1b"),
@@ -88,6 +92,8 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     Vector(Map.empty[String, String]),
     false,
     false,
+    "/Cromwell/job/",
+    Map(),
     "local")
 
   "AwsBatchRuntimeAttributes" should {
