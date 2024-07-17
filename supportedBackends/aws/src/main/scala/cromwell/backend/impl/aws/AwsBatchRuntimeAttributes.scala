@@ -127,9 +127,9 @@ object AwsBatchRuntimeAttributes {
 
   private val MemoryDefaultValue = "2 GB"
 
-  private val logGroupKey = "logGroupName"
-  private val logGroupValidationInstance = new StringRuntimeAttributesValidation(logGroupKey)
-  private val LogGroupDefaultValue = WomString("/aws/batch/job")
+  private val logGroupNameKey = "logGroupName"
+  private val logGroupNameValidationInstance = new StringRuntimeAttributesValidation(logGroupNameKey)
+  private val LogGroupNameDefaultValue = WomString("/aws/batch/job")
 
   private val additionalTagsKey = "additionalTags"
 

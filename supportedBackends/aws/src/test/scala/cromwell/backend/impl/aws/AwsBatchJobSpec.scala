@@ -127,7 +127,7 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
       efsDelocalize = false,
       efsMakeMD5 = false,
       fileSystem = "s3",
-      logsGroup = "/aws/batch/job",
+      logGroupName = "/aws/batch/job",
       additionalTags = Map("tag" -> "value")
   )
 
