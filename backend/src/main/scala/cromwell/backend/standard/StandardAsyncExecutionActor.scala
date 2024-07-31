@@ -38,7 +38,6 @@ import wom.callable.{AdHocValue, CommandTaskDefinition, ContainerizedInputExpres
 import wom.expression.WomExpression
 import wom.graph.LocalName
 import wom.values._
-import wom.types._
 import wom.{CommandSetupSideEffectFile, InstantiatedCommand, WomFileMapper}
 import java.net.URLDecoder
 import scala.concurrent._

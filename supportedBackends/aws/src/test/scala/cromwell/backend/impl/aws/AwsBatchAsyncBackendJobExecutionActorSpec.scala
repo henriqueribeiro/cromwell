@@ -749,7 +749,7 @@ class AwsBatchAsyncBackendJobExecutionActorSpec extends TestKitSuite
         WomSingleFile("/cromwell_root/path/to/file2"), WomSingleFile("/cromwell_root/path/to/file3"))),
       WomMap(WomMapType(WomSingleFileType, WomSingleFileType), Map(
         WomSingleFile("/cromwell_root/path/to/file4") -> WomSingleFile("/cromwell_root/path/to/file5")
-      ))
+      )),
     )
 
     val workflowDescriptor = BackendWorkflowDescriptor(
