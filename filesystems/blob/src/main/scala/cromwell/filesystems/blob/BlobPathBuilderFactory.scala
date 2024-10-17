@@ -1,38 +1,31 @@
 package cromwell.filesystems.blob
 
 import akka.actor.ActorSystem
-import com.azure.core.management.AzureEnvironment
-import com.azure.core.management.profile.AzureProfile
-import com.azure.identity.DefaultAzureCredentialBuilder
-import com.azure.resourcemanager.AzureResourceManager
-import com.azure.storage.blob.BlobContainerClientBuilder
-import com.azure.storage.blob.sas.{BlobContainerSasPermission, BlobServiceSasSignatureValues}
-import com.azure.storage.common.StorageSharedKeyCredential
 import com.typesafe.config.Config
 import cromwell.core.WorkflowOptions
 import cromwell.core.path.PathBuilderFactory
-import net.ceedubs.ficus.Ficus._
+import cromwell.core.path.PathBuilderFactory.PriorityBlob
 
-import java.time.OffsetDateTime
-import scala.concurrent.ExecutionContext
-import scala.concurrent.Future
-import scala.jdk.CollectionConverters._
+import java.util.UUID
+import scala.concurrent.{ExecutionContext, Future}
 
-final case class BlobFileSystemConfig(config: Config)
-final case class BlobPathBuilderFactory(globalConfig: Config, instanceConfig: Config, singletonConfig: BlobFileSystemConfig) extends PathBuilderFactory {
-  val container: String = instanceConfig.as[String]("store")
-  val endpoint: String = instanceConfig.as[String]("endpoint")
-  val workspaceId: Option[String] = instanceConfig.as[Option[String]]("workspace-id")
-  val workspaceManagerURL: Option[String] = singletonConfig.config.as[Option[String]]("workspace-manager-url")
+final case class SubscriptionId(value: UUID) {override def toString: String = value.toString}
+final case class BlobContainerName(value: String) {override def toString: String = value}
+final case class StorageAccountName(value: String) {override def toString: String = value}
+final case class EndpointURL(value: String) {override def toString: String = value}
+final case class WorkspaceId(value: UUID) {override def toString: String = value.toString}
+final case class ContainerResourceId(value: UUID) {override def toString: String = value.toString}
+final case class WorkspaceManagerURL(value: String) {override def toString: String = value}
 
-  val blobTokenGenerator: BlobTokenGenerator = BlobTokenGenerator.createBlobTokenGenerator(
-    container, endpoint, workspaceId, workspaceManagerURL)
+final case class BlobPathBuilderFactory(globalConfig: Config, instanceConfig: Config, fsm: BlobFileSystemManager) extends PathBuilderFactory {
 
   override def withOptions(options: WorkflowOptions)(implicit as: ActorSystem, ec: ExecutionContext): Future[BlobPathBuilder] = {
     Future {
-      new BlobPathBuilder(blobTokenGenerator, container, endpoint)
+      new BlobPathBuilder(fsm.container, fsm.endpoint)(fsm)
     }
   }
+
+  override def priority: Int = PriorityBlob
 }
 
 sealed trait BlobTokenGenerator {

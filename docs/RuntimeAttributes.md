@@ -30,18 +30,29 @@ workflow jes_workflow {
 
 Cromwell recognizes certain runtime attributes and has the ability to format these for some [Backends](/backends/Backends). See the table below for common attributes that apply to _most_ backends.
 
-| Runtime Attribute    | LOCAL |  Google Cloud  | AWS Batch |  HPC  |
-| -------------------- |:-----:|:-----:|:-----:|:------:|
-| [cpu](#cpu)                  |       |   x   |   x   |  `cpu`  |
-| [memory](#memory)                              |       |   x   |   x   |  `memory_mb` / `memory_gb`  |
-| [disks](#disks)                                |       |   x   |       |  *  |
-| [docker](#docker)                              |   x   |   x   |   x   |  `docker` (see below)  |
-| [maxRetries](#maxretries)                      |   x   |   x   |   x   | * |
-| [continueOnReturnCode](#continueonreturncode) |   x   |   x   |   x   | * |
-| [failOnStderr](#failonstderr)                  |   x   |   x   |   x   |  *  |
+| Runtime Attribute                               | Local | Google Cloud | TES       | AWS Batch |            HPC            |
+|-------------------------------------------------|:-----:|:------------:|-----------|:---------:|:-------------------------:|
+| [`cpu`](#cpu)                                   |       |      ✅       |           |     ✅     |           `cpu`           |
+| [`memory`](#memory)                             |       |      ✅       |           |     ✅     | `memory_mb` / `memory_gb` |
+| [`disks`](#disks)                               |       |      ✅       | ⚠️ Note 1 | ⚠️ Note 2 |         ℹ️ Note 3         |
+| [`disk`](#disk)                                 |       |              | ✅         |           |                           |
+| [`docker`](#docker)                             |   ✅   |      ✅       |           |     ✅     |    `docker` ℹ️ Note 3     |
+| [`maxRetries`](#maxretries)                     |   ✅   |      ✅       |           |     ✅     |         ℹ️ Note 3         |
+| [`continueOnReturnCode`](#continueonreturncode) |   ✅   |      ✅       |           |     ✅     |         ℹ️ Note 3         |
+| [`failOnStderr`](#failonstderr)                 |   ✅   |      ✅       |           |     ✅     |         ℹ️ Note 3         |
 
 
-> `*` The HPC [Shared Filesystem backend](/backends/HPC#shared-filesystem) (SFS) is fully configurable and any number of attributes can be exposed. Cromwell recognizes some of these attributes (`cpu`, `memory` and `docker`) and parses them into the attribute listed in the table which can be used within the HPC backend configuration.
+> **Note 1**
+> 
+> Partial support. See [TES documentation](/backends/TES) for details. 
+ 
+> **Note 2**
+>
+> Partial support. See [`disks`](#disks) for details.
+
+> **Note 3**
+> 
+> The HPC [Shared Filesystem backend](/backends/HPC#shared-filesystem) (SFS) is fully configurable and any number of attributes can be exposed. Cromwell recognizes some of these attributes (`cpu`, `memory` and `docker`) and parses them into the attribute listed in the table which can be used within the HPC backend configuration.
 
 
 ### Google Cloud Specific Attributes
@@ -56,6 +67,9 @@ There are a number of additional runtime attributes that apply to the Google Clo
 - [useDockerImageCache](#usedockerimagecache)
 
 
+### AWS Specific Attributes
+- [awsBatchRetryAttempts](#awsBatchRetryAttempts)
+- [ulimits](#ulimits)
 
 ## Expression support
 
@@ -153,15 +167,6 @@ runtime {
 }
 ```
 
-
-#### CWL
-
-CWL splits the `cpu` requirement into `cpuMin` and `cpuMax`. If one of them is provided, `cpu` will inherit this value. If both of them are provided, `cpu` will take the value of `cpuMin`.
-If none is provided, `cpu` will default to its default value.
-
-Note: If provided, `cpuMin` and/or `cpuMax` will be available to the [HPC runtime attribute configuration](/tutorials/HPCIntro.md#specifying-the-runtime-attributes-for-your-hpc-tasks).
-
-
 ### `memory`
 *Default: "2G"*
 
@@ -179,12 +184,6 @@ runtime {
 ```
 
 Within the SFS backend, you can additionally specify `memory_mb` or `memory_gb` as runtime attributes within the configuration. More information can be found [here](https://cromwell.readthedocs.io/en/stable/tutorials/HPCIntro/#specifying-the-runtime-attributes-for-your-hpc-tasks).
-
-#### CWL
-
-CWL splits the `memory` requirement into `ramMin` and `ramMax`. If one of them is provided, `memory` will inherit this value. If both of them are provided, `memory` will take the value of `ramMin`. If none is provided, `memory` will default to its default value.
-
-Note: If provided, `ramMin` and/or `ramMax` will be available to the [HPC runtime attribute configuration](/tutorials/HPCIntro.md#specifying-the-runtime-attributes-for-your-hpc-tasks).
 
 
 ### `disks`
@@ -218,6 +217,16 @@ runtime {
 ```
 runtime {
   disks: "/mnt/my_mnt 3 SSD, /mnt/my_mnt2 500 HDD"
+}
+```
+
+### `disk`
+
+Specific to the TES backend, sets the `disk_gb` resource.
+
+```
+runtime {
+  disk: "25 GB"
 }
 ```
 
@@ -323,8 +332,6 @@ runtime {
 ```
 
 
-
-
 ### `bootDiskSizeGb`
 
 In addition to working disks, Google Cloud allows specification of a boot disk size. This is the disk where the docker image itself is booted (**not the working directory of your task on the VM**).
@@ -372,6 +379,56 @@ runtime {
   noAddress: true
 }
 ```
+
+
+### `awsBatchRetryAttempts`
+
+*Default: _0_*
+
+This runtime attribute adds support to [*AWS Batch Automated Job Retries*](https://docs.aws.amazon.com/batch/latest/userguide/job_retries.html) which makes it possible to tackle transient job failures. For example, if a task fails due to a timeout from accessing an external service, then this option helps re-run the failed the task without having to re-run the entire workflow. This option is also very useful when using SPOT instances.
+
+It takes an Int, between 1 and 10, as a value that indicates the maximum number of times AWS Batch should retry a failed task. If the value 0 is passed, the [*Retry Strategy*](https://docs.aws.amazon.com/batch/latest/userguide/job_definition_parameters.html#retryStrategy) will not be added to the job definiton and the task will run just once.
+
+```
+runtime {
+  awsBatchRetryAttempts: integer
+}
+```
+
+
+### `ulimits`
+
+*Default: _empty_*
+
+A list of [`ulimits`](https://docs.aws.amazon.com/batch/latest/userguide/job_definition_parameters.html#containerProperties) values to set in the container. This parameter maps to `Ulimits` in the [Create a container](https://docs.docker.com/engine/api/v1.38/) section of the [Docker Remote API](https://docs.docker.com/engine/api/v1.38/) and the `--ulimit` option to [docker run](https://docs.docker.com/engine/reference/commandline/run/).
+
+```
+"ulimits": [
+  {
+    "name": string,
+    "softLimit": integer,
+    "hardLimit": integer
+  }
+  ...
+]
+```
+Parameter description:
+
+- `name`
+  - The `type` of the `ulimit`.
+  - Type: String
+  - Required: Yes, when `ulimits` is used.
+
+- `softLimit`
+  - The soft limit for the `ulimit` type.
+  - Type: Integer
+  - Required: Yes, when `ulimits` is used.
+
+- `hardLimit`
+  - The hard limit for the `ulimit` type.
+  - Type: Integer
+  - Required: Yes, when `ulimits` is used.
+
 
 #### How to Setup
 

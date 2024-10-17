@@ -32,7 +32,7 @@
 package cromwell.backend.impl.aws
 
 import akka.actor.Actor
-import cromwell.backend.impl.aws.io.{AwsBatchVolume, AwsBatchWorkingDisk}
+import cromwell.backend.impl.aws.io.{AwsBatchVolume, AwsBatchWorkingDisk,AwsBatchJobPaths}
 import cromwell.backend.standard.StandardCachingActorHelper
 import cromwell.core.logging.JobLogging
 import cromwell.core.path.Path
@@ -57,9 +57,11 @@ trait AwsBatchJobCachingActorHelper extends StandardCachingActorHelper {
 
   lazy val workingDisk: AwsBatchVolume = runtimeAttributes.disks.find(x => configuration.fileSystem match {
     case AWSBatchStorageSystems.s3 => x.name == AwsBatchWorkingDisk.Name
-    case _ =>  configuration.root.startsWith(x.mountPoint.pathAsString)
+    case _ =>  {
+      // configuration.root.startsWith(x.mountPoint.pathAsString)
+      x.name == AwsBatchWorkingDisk.Name
+    }
   }).get
-
 
   lazy val callRootPath: Path = callPaths.callExecutionRoot
   lazy val returnCodeFilename: String = callPaths.returnCodeFilename

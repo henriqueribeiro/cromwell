@@ -262,7 +262,7 @@ class EngineJobExecutionActor(replyTo: ActorRef,
         log.info(template, jobTag, data.failedCopyAttempts, callCachingParameters.maxFailedCopyAttempts, data.aggregatedHashString)
       } else {
         log.info(s"BT-322 {} cache hit copying nomatch: could not find a suitable cache hit.", jobTag)
-        workflowLogger.info("Could not copy a suitable cache hit for {}. No copy attempts were made.", arg = jobTag)
+        workflowLogger.debug(s"Could not copy a suitable cache hit for {$jobTag}. No copy attempts were made.")
       }
 
       runJob(data)
@@ -753,7 +753,7 @@ class EngineJobExecutionActor(replyTo: ActorRef,
 
   private def logCacheHitSuccessAndNotifyMetadata(data: ResponsePendingData): Unit = {
 
-    val metadataMap = Map(callCachingHitResultMetadataKey -> true) ++ data.ejeaCacheHit.flatMap(_.details).map(details => callCachingReadResultMetadataKey -> s"Cache Hit: $details").toMap
+    val metadataMap = Map[String, Any](callCachingHitResultMetadataKey -> true) ++ data.ejeaCacheHit.flatMap(_.details).map(details => callCachingReadResultMetadataKey -> s"Cache Hit: $details").toMap
 
     writeToMetadata(metadataMap)
 

@@ -32,6 +32,7 @@ object RuntimeAttributesKeys {
   val OutDirMaxKey = "outDirMax"
   val FailOnStderrKey = "failOnStderr"
   val ContinueOnReturnCodeKey = "continueOnReturnCode"
+  val sharedMemoryKey = "sharedMemorySize"
 }
 
 case class RuntimeAttributes(attributes: Map[String, WomExpression])
