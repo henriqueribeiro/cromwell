@@ -32,7 +32,6 @@
 package cromwell.backend.impl.aws
 
 import java.net.{SocketTimeoutException, URLDecoder}
-import java.net.{SocketTimeoutException, URLDecoder}
 import java.io.FileNotFoundException
 import java.nio.file.Paths
 
