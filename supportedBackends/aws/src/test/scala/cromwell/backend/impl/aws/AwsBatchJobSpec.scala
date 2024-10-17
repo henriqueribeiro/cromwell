@@ -126,7 +126,17 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
       ulimits = Vector(Map.empty[String, String]),
       efsDelocalize = false,
       efsMakeMD5 = false,
-      fileSystem = "s3")
+      fileSystem = "s3",
+      logGroupName = "/aws/batch/job",
+      additionalTags = Map("tag" -> "value")
+  )
+
+  val batchJobDefintion = AwsBatchJobDefinitionContext(
+    runtimeAttributes = runtimeAttributes,
+    commandText = "", dockerRcPath = "", dockerStdoutPath = "", dockerStderrPath = "", jobDescriptor = jobDescriptor
+    , jobPaths = jobPaths, inputs = Set(), outputs = Set(), fsxMntPoint = None, None, None, None
+
+  )
 
   val batchJobDefintion = AwsBatchJobDefinitionContext(
     runtimeAttributes = runtimeAttributes,

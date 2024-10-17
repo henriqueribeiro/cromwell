@@ -34,7 +34,7 @@ package cromwell.backend.impl.aws
 import scala.collection.mutable.ListBuffer
 import cromwell.backend.BackendJobDescriptor
 import cromwell.backend.io.JobPaths
-import software.amazon.awssdk.services.batch.model.{ContainerProperties, EvaluateOnExit, Host, KeyValuePair, MountPoint, ResourceRequirement, ResourceType, RetryAction, RetryStrategy, Ulimit, Volume}
+import software.amazon.awssdk.services.batch.model.{ContainerProperties, EvaluateOnExit, Host, KeyValuePair, LogConfiguration, MountPoint, ResourceRequirement, ResourceType, RetryAction, RetryStrategy, Ulimit, Volume}
 import cromwell.backend.impl.aws.io.AwsBatchVolume
 
 import scala.jdk.CollectionConverters._
@@ -153,8 +153,8 @@ trait AwsBatchJobDefinitionBuilder {
       ).toList
     }
 
-    def buildName(imageName: String, packedCommand: String, volumes: List[Volume], mountPoints: List[MountPoint], env: Seq[KeyValuePair], ulimits: List[Ulimit], efsDelocalize: Boolean, efsMakeMD5: Boolean, tagResources: Boolean): String = {
-      s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}:${tagResources.toString}"
+    def buildName(imageName: String, packedCommand: String, volumes: List[Volume], mountPoints: List[MountPoint], env: Seq[KeyValuePair], ulimits: List[Ulimit], efsDelocalize: Boolean, efsMakeMD5: Boolean, tagResources: Boolean, logGroupName: String): String = {
+      s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}:${tagResources.toString}:$logGroupName"
     }
 
     val environment = List.empty[KeyValuePair]
@@ -165,6 +165,15 @@ trait AwsBatchJobDefinitionBuilder {
     val packedCommand = packCommand("/bin/bash", "-c", cmdName)
     val volumes =  buildVolumes( context.runtimeAttributes.disks, context.fsxMntPoint)
     val mountPoints = buildMountPoints( context.runtimeAttributes.disks, context.fsxMntPoint)
+    val logGroupName = context.runtimeAttributes.logGroupName
+    val logConfiguration = LogConfiguration.builder()
+      .logDriver("awslogs")
+      .options(
+        Map(
+          "awslogs-group" -> logGroupName
+        ).asJava
+      )
+      .build()
     val ulimits = buildUlimits( context.runtimeAttributes.ulimits)
     val efsDelocalize = context.runtimeAttributes.efsDelocalize
     val efsMakeMD5 = context.runtimeAttributes.efsMakeMD5
@@ -179,7 +188,8 @@ trait AwsBatchJobDefinitionBuilder {
       ulimits,
       efsDelocalize,
       efsMakeMD5,
-      tagResources
+      tagResources,
+      logGroupName
     )
 
     // To reuse job definition for gpu and gpu-runs, we will create a job definition that does not gpu requirements
@@ -191,6 +201,7 @@ trait AwsBatchJobDefinitionBuilder {
         ResourceRequirement.builder().`type`(ResourceType.VCPU).value(context.runtimeAttributes.cpu.##.toString).build(),
         ResourceRequirement.builder().`type`(ResourceType.MEMORY).value(context.runtimeAttributes.memory.to(MemoryUnit.MB).amount.toInt.toString).build()
       )
+      .logConfiguration(logConfiguration)
       .volumes(volumes.asJava)
       .mountPoints(mountPoints.asJava)
       .environment(environment.asJava)
