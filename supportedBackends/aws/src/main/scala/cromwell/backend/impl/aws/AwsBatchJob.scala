@@ -30,7 +30,6 @@
  */
 package cromwell.backend.impl.aws
 
-
 import java.security.MessageDigest
 import java.nio.file.attribute.PosixFilePermission
 
@@ -149,8 +148,6 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       case input: AwsBatchFileInput => 
         // an entry in 'disks' => keep mount as it is.. 
         //here we don't need a copy command but the centaurTests expect us to verify the existence of the file
-        //val filePath = s"${input.mount.mountPoint.pathAsString}/${input.local.pathAsString}"
-        //  .replace(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
         val filePath = input.local.pathAsString
         Log.debug("input entry in disks detected "+ input.s3key + " / "+ input.local.pathAsString)
         s"""test -e "$filePath" || (echo 'input file: $filePath does not exist' && LOCALIZATION_FAILED=1)""".stripMargin
@@ -159,7 +156,10 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     }.toList.mkString("\n")
 
     // get multipart threshold from config.
-    val mp_threshold : Long = if (conf.hasPath("engine.filesystems.s3.MultipartThreshold") ) conf.getMemorySize("engine.filesystems.s3.MultipartThreshold").toBytes() else 5L * 1024L * 1024L * 1024L; 
+    val mp_threshold: Long =
+      if (conf.hasPath("engine.filesystems.s3.MultipartThreshold"))
+        conf.getMemorySize("engine.filesystems.s3.MultipartThreshold").toBytes()
+      else 5L * 1024L * 1024L * 1024L;
     Log.debug(s"MultiPart Threshold for delocalizing is $mp_threshold")
 
     // prepare tags, strip invalid characters
@@ -171,8 +171,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     val workflowId = invalidCharsPattern.replaceAllIn(jobDescriptor.workflowDescriptor.rootWorkflowId.toString,"_")
     val workflowName = invalidCharsPattern.replaceAllIn(jobDescriptor.workflowDescriptor.rootWorkflow.name.toString,"_")
     val taskId = invalidCharsPattern.replaceAllIn(jobDescriptor.key.call.fullyQualifiedName + "-" + jobDescriptor.key.index + "-" + jobDescriptor.key.attempt,"_")
-    val doTagging = tagResources.getOrElse(false) // development : always tag resources.
-    //val tags: Map[String,String] = Map("cromwell-workflow-name" -> workflowName, "cromwell-workflow-id" -> workflowId, "cromwell-task-id" -> taskId)
+    val doTagging = tagResources.getOrElse(false) 
     // this goes at the start of the script after the #!
     val preamble =
       s"""
@@ -421,6 +420,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
            val md5_cmd = if (efsMakeMD5.isDefined && efsMakeMD5.getOrElse(false)) {
                     Log.debug("Add cmd to create MD5 sibling.")
                     // this does NOT regenerate the md5 in case the file is overwritten ! 
+                    // TODO : Add check for file age => recreate if md5 older than main file
                     s"""
                         |if [[ ! -f '${output.mount.mountPoint.pathAsString}/${output.local.pathAsString}.md5' ]] ; then 
                         |   # the glob list
@@ -842,7 +842,9 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       .append("runtimeAttributes", runtimeAttributes)
       .append("commandLine", commandLine)
       .append("commandScript", commandScript)
-      .append("dockerRc", dockerRc).append("dockerStderr", dockerStderr).append("dockerStdout", dockerStdout)
+      .append("dockerRc", dockerRc)
+      .append("dockerStderr", dockerStderr)
+      .append("dockerStdout", dockerStdout)
       .append("inputs", inputs)
       .append("outputs", outputs)
       .append("jobPaths", jobPaths)
