@@ -152,19 +152,22 @@ object AwsBatchRuntimeAttributes {
 
   private def failOnStderrValidation(runtimeConfig: Option[Config]) = FailOnStderrValidation.default(runtimeConfig)
 
-  private def continueOnReturnCodeValidation(runtimeConfig: Option[Config]) = ContinueOnReturnCodeValidation.default(runtimeConfig)
+  private def continueOnReturnCodeValidation(runtimeConfig: Option[Config]) =
+    ContinueOnReturnCodeValidation.default(runtimeConfig)
 
-  private def disksValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Seq[AwsBatchVolume]] = DisksValidation
-    .withDefault(DisksValidation.configDefaultWomValue(runtimeConfig) getOrElse DisksDefaultValue)
+  private def disksValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Seq[AwsBatchVolume]] =
+    DisksValidation
+      .withDefault(DisksValidation.configDefaultWomValue(runtimeConfig) getOrElse DisksDefaultValue)
 
-  private def zonesValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Vector[String]] = ZonesValidation
-    .withDefault(ZonesValidation.configDefaultWomValue(runtimeConfig) getOrElse ZonesDefaultValue)
+  private def zonesValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Vector[String]] =
+    ZonesValidation
+      .withDefault(ZonesValidation.configDefaultWomValue(runtimeConfig) getOrElse ZonesDefaultValue)
 
-  private def memoryValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[MemorySize] = {
+  private def memoryValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[MemorySize] =
     MemoryValidation.withDefaultMemory(
       RuntimeAttributesKeys.MemoryKey,
-      MemoryValidation.configDefaultString(RuntimeAttributesKeys.MemoryKey, runtimeConfig) getOrElse MemoryDefaultValue)
-  }
+      MemoryValidation.configDefaultString(RuntimeAttributesKeys.MemoryKey, runtimeConfig) getOrElse MemoryDefaultValue
+    )
 
   private def memoryMinValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[MemorySize] = {
     MemoryValidation.withDefaultMemory(
@@ -172,14 +175,15 @@ object AwsBatchRuntimeAttributes {
       MemoryValidation.configDefaultString(RuntimeAttributesKeys.MemoryMinKey, runtimeConfig) getOrElse MemoryDefaultValue)
   }
 
+  private def noAddressValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Boolean] =
+    noAddressValidationInstance
+      .withDefault(noAddressValidationInstance.configDefaultWomValue(runtimeConfig) getOrElse NoAddressDefaultValue)
+
   private def sharedMemorySizeValidation(runtimeConfig: Option[Config]):  RuntimeAttributesValidation[Refined[Int, Positive]] = {
     SharedMemorySizeValidation(sharedMemoryKey).withDefault(
       SharedMemorySizeValidation(sharedMemoryKey).configDefaultWomValue(runtimeConfig).getOrElse(defaultSharedMemorySize)
     )
   }
-
-  private def noAddressValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Boolean] = noAddressValidationInstance
-    .withDefault(noAddressValidationInstance.configDefaultWomValue(runtimeConfig) getOrElse NoAddressDefaultValue)
 
   private def logGroupNameValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[String] = logGroupNameValidationInstance
     .withDefault(logGroupNameValidationInstance.configDefaultWomValue(runtimeConfig) getOrElse LogGroupNameDefaultValue)
@@ -192,8 +196,10 @@ object AwsBatchRuntimeAttributes {
   private val dockerValidation: RuntimeAttributesValidation[String] = DockerValidation.instance
 
   private def queueArnValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[String] =
-    QueueArnValidation.withDefault(QueueArnValidation.configDefaultWomValue(runtimeConfig) getOrElse
-      (throw new RuntimeException("queueArn is required")))
+    QueueArnValidation.withDefault(
+      QueueArnValidation.configDefaultWomValue(runtimeConfig) getOrElse
+        (throw new RuntimeException("queueArn is required"))
+    )
 
   private def awsBatchRetryAttemptsValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Int] = {
     AwsBatchRetryAttemptsValidation(awsBatchRetryAttemptsKey).withDefault(AwsBatchRetryAttemptsValidation(awsBatchRetryAttemptsKey)
@@ -271,7 +277,7 @@ object AwsBatchRuntimeAttributes {
                         awsBatchtagResourcesValidation(runtimeConfig),
                         sharedMemorySizeValidation(runtimeConfig),
                       )
-   def validationsLocalBackend  = StandardValidatedRuntimeAttributesBuilder.default(runtimeConfig).withValidation(
+    def validationsLocalBackend  = StandardValidatedRuntimeAttributesBuilder.default(runtimeConfig).withValidation(
       cpuValidation(runtimeConfig),
       cpuMinValidation(runtimeConfig),
       gpuCountValidation(runtimeConfig),
@@ -292,10 +298,10 @@ object AwsBatchRuntimeAttributes {
       sharedMemorySizeValidation(runtimeConfig),
     )
 
-    configuration.fileSystem match  {
-       case AWSBatchStorageSystems.s3 =>  validationsS3backend
+    configuration.fileSystem match {
+      case AWSBatchStorageSystems.s3 => validationsS3backend
 
-       case _ => validationsLocalBackend
+      case _ => validationsLocalBackend
     }
   }
 
@@ -303,8 +309,10 @@ object AwsBatchRuntimeAttributes {
     val cpu: Int Refined Positive = RuntimeAttributesValidation.extract(cpuValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
     val gpuCount: Int = RuntimeAttributesValidation.extract(gpuCountValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
     val zones: Vector[String] = RuntimeAttributesValidation.extract(ZonesValidation, validatedRuntimeAttributes)
-    val memory: MemorySize = RuntimeAttributesValidation.extract(memoryValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
-    val disks: Seq[AwsBatchVolume] = RuntimeAttributesValidation.extract(disksValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
+    val memory: MemorySize =
+      RuntimeAttributesValidation.extract(memoryValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
+    val disks: Seq[AwsBatchVolume] =
+      RuntimeAttributesValidation.extract(disksValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
     val docker: String = RuntimeAttributesValidation.extract(dockerValidation, validatedRuntimeAttributes)
     val queueArn: String = RuntimeAttributesValidation.extract(queueArnValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
     val failOnStderr: Boolean = RuntimeAttributesValidation.extract(failOnStderrValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
@@ -361,23 +369,21 @@ object ScriptS3BucketNameValidation {
   def apply(key: String): ScriptS3BucketNameValidation = new ScriptS3BucketNameValidation(key)
 }
 
-class ScriptS3BucketNameValidation( key: String ) extends StringRuntimeAttributesValidation(key) {
+class ScriptS3BucketNameValidation(key: String) extends StringRuntimeAttributesValidation(key) {
 
-  //a reasonable but not perfect regex for a bucket. see https://stackoverflow.com/a/50484916/3573553
-  protected val s3BucketNameRegex: Regex = "(?=^.{3,63}$)(?!^(\\d+\\.)+\\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\\-]*[a-z0-9])\\.)*([a-z0-9]|[a-z0-9][a-z0-9\\-]*[a-z0-9])$)"
-    .r
+  // a reasonable but not perfect regex for a bucket. see https://stackoverflow.com/a/50484916/3573553
+  protected val s3BucketNameRegex: Regex =
+    "(?=^.{3,63}$)(?!^(\\d+\\.)+\\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\\-]*[a-z0-9])\\.)*([a-z0-9]|[a-z0-9][a-z0-9\\-]*[a-z0-9])$)".r
 
-
-  override protected def validateValue: PartialFunction[WomValue, ErrorOr[String]] = {
-    case WomString(s) => validateBucketName(s)
+  override protected def validateValue: PartialFunction[WomValue, ErrorOr[String]] = { case WomString(s) =>
+    validateBucketName(s)
   }
 
-  private def validateBucketName(possibleBucketName: String): ErrorOr[String] = {
+  private def validateBucketName(possibleBucketName: String): ErrorOr[String] =
     possibleBucketName match {
-      case s3BucketNameRegex(_@_*) => possibleBucketName.validNel
+      case s3BucketNameRegex(_ @_*) => possibleBucketName.validNel
       case _ => "The Script Bucket name has an invalid s3 bucket format".invalidNel
     }
-  }
 }
 
 object QueueArnValidation extends ArnValidation(AwsBatchRuntimeAttributes.QueueArnKey) {
@@ -385,7 +391,7 @@ object QueueArnValidation extends ArnValidation(AwsBatchRuntimeAttributes.QueueA
   // https://docs.aws.amazon.com/en_us/general/latest/gr/aws-arns-and-namespaces.html#arn-syntax-batch
   // arn:aws:batch:region:account-id:job-queue/queue-name
   override protected val arnRegex: Regex =
-  s"""
+    s"""
       (?x)                            # Turn on comments and whitespace insensitivity
       (arn)                           # Every AWS ARN starts with "arn"
       :
@@ -417,22 +423,21 @@ object ArnValidation {
 }
 
 class ArnValidation(override val key: String) extends StringRuntimeAttributesValidation(key) {
-  override protected def validateValue: PartialFunction[WomValue, ErrorOr[String]] = {
-    case WomString(s) => validateArn(s)
+  override protected def validateValue: PartialFunction[WomValue, ErrorOr[String]] = { case WomString(s) =>
+    validateArn(s)
   }
 
-  private def validateArn(possibleArn: String): ErrorOr[String] = {
+  private def validateArn(possibleArn: String): ErrorOr[String] =
     possibleArn match {
-      case arnRegex(_@_*) => possibleArn.validNel
+      case arnRegex(_ @_*) => possibleArn.validNel
       case _ => "ARN has invalid format".invalidNel
     }
-  }
 
   // Possible ARN formats can be found here
   // https://docs.aws.amazon.com/en_us/general/latest/gr/aws-arns-and-namespaces.html
   // This is quite vague regex, but it allows to support a lot of ARN formats
   protected val arnRegex: Regex =
-  s"""
+    s"""
       (?x)                            # Turn on comments and whitespace insensitivity
       (arn)                           # Every ARN starts with "arn"
       :
@@ -505,27 +510,25 @@ object DisksValidation extends RuntimeAttributesValidation[Seq[AwsBatchVolume]] 
     defaulted
   }
 
-  private def validateLocalDisk(disk: String): ErrorOr[AwsBatchVolume] = {
+  private def validateLocalDisk(disk: String): ErrorOr[AwsBatchVolume] =
     AwsBatchVolume.parse(disk) match {
       case scala.util.Success(attachedDisk) => attachedDisk.validNel
       case scala.util.Failure(ex) => ex.getMessage.invalidNel
     }
-  }
 
   private def sequenceNels(nels: Seq[ErrorOr[AwsBatchVolume]]): ErrorOr[Seq[AwsBatchVolume]] = {
     val emptyDiskNel: ErrorOr[Vector[AwsBatchVolume]] = Vector.empty[AwsBatchVolume].validNel
-    val disksNel: ErrorOr[Vector[AwsBatchVolume]] = nels.foldLeft(emptyDiskNel) {
-      (acc, v) => (acc, v) mapN { (a, v) => a :+ v }
+    val disksNel: ErrorOr[Vector[AwsBatchVolume]] = nels.foldLeft(emptyDiskNel) { (acc, v) =>
+      (acc, v) mapN { (a, v) => a :+ v }
     }
     disksNel
   }
 
-  private def addDefault(disksNel: ErrorOr[Seq[AwsBatchVolume]]): ErrorOr[Seq[AwsBatchVolume]] = {
+  private def addDefault(disksNel: ErrorOr[Seq[AwsBatchVolume]]): ErrorOr[Seq[AwsBatchVolume]] =
     disksNel map {
       case disks if disks.exists(_.name == AwsBatchWorkingDisk.Name) || disks.exists(_.fsType == "efs") => disks
       case disks => disks :+ AwsBatchWorkingDisk.Default
     }
-  }
 
   override protected def missingValueMessage: String =
     s"Expecting $key runtime attribute to be a comma separated String or Array[String]"

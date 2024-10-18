@@ -51,12 +51,17 @@ import software.amazon.awssdk.services.batch.model._
 import software.amazon.awssdk.services.cloudwatchlogs.CloudWatchLogsClient
 import software.amazon.awssdk.services.cloudwatchlogs.model.{GetLogEventsRequest, OutputLogEvent}
 import software.amazon.awssdk.services.s3.S3Client
-import software.amazon.awssdk.services.s3.model.{GetObjectRequest, HeadObjectRequest, NoSuchKeyException, PutObjectRequest}
+import software.amazon.awssdk.services.s3.model.{
+  GetObjectRequest,
+  HeadObjectRequest,
+  NoSuchKeyException,
+  PutObjectRequest
+}
 import wdl4s.parser.MemoryUnit
 
 import scala.jdk.CollectionConverters._
 import scala.concurrent.duration._
-import scala.util.Try
+import scala.util.{Random, Try}
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
 
@@ -94,7 +99,8 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
 
 
   val Log: Logger = LoggerFactory.getLogger(AwsBatchJob.getClass)
-  //this will be the "folder" that scripts will live in (underneath the script bucket)
+
+  // this will be the "folder" that scripts will live in (underneath the script bucket)
   val scriptKeyPrefix = "scripts/"
 
   lazy val batchClient: BatchClient = {
@@ -122,14 +128,14 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     val awsCmd = "/usr/local/aws-cli/v2/current/bin/aws"
     //internal to the container, therefore not mounted
     val workDir = "/tmp/scratch"
-    //working in a mount will cause collisions in long running workers
+    // working in a mount will cause collisions in long running workers
     val replaced = commandScript.replace(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
     val insertionPoint = replaced.indexOf("\n", replaced.indexOf("#!")) +1 //just after the new line after the shebang!
     // load the config
     val conf : Config = ConfigFactory.load();
 
     /* generate a series of s3 copy statements to copy any s3 files into the container. */
-    val inputCopyCommand = inputs.map {
+    val inputCopyCommand = Random.shuffle(inputs.map {
       case input: AwsBatchFileInput if input.s3key.startsWith("s3://") && input.s3key.endsWith(".tmp") =>
         //we are localizing a tmp file which may contain workdirectory paths that need to be reconfigured
         s"""
@@ -155,7 +161,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
         s"""test -e "$filePath" || (echo 'input file: $filePath does not exist' && LOCALIZATION_FAILED=1)""".stripMargin
 
       case _ => ""
-    }.toList.mkString("\n")
+    }.toList).mkString("\n")
 
     // get multipart threshold from config.
     val mp_threshold: Long =
@@ -500,8 +506,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |if [ -f "$stdOut" ]; then _s3_delocalize_with_retry "$stdOut" "${jobPaths.standardPaths.output.pathAsString}"; fi
          |""".stripMargin
 
-
-    //insert the preamble at the insertion point and the postscript copy command at the end
+    // insert the preamble at the insertion point and the postscript copy command at the end
     replaced.patch(insertionPoint, preamble, 0) +
       s"""
          |{
@@ -529,25 +534,28 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |}
          |""".stripMargin
   }
-  private def batch_file_s3_url(scriptBucketName: String, scriptKeyPrefix: String, scriptKey: String): String  = runtimeAttributes.fileSystem match {
-       case AWSBatchStorageSystems.s3  => s"s3://${runtimeAttributes.scriptS3BucketName}/$scriptKeyPrefix$scriptKey"
-       case _ => ""
-  }
+  private def batch_file_s3_url(scriptBucketName: String, scriptKeyPrefix: String, scriptKey: String): String =
+    runtimeAttributes.fileSystem match {
+      case AWSBatchStorageSystems.s3 => s"s3://${runtimeAttributes.scriptS3BucketName}/$scriptKeyPrefix$scriptKey"
+      case _ => ""
+    }
 
   private def generateEnvironmentKVPairs(scriptBucketName: String, scriptKeyPrefix: String, scriptKey: String): List[KeyValuePair] = {
     List(
       buildKVPair("BATCH_FILE_TYPE", "script"),
-      buildKVPair("BATCH_FILE_S3_URL",batch_file_s3_url(scriptBucketName,scriptKeyPrefix,scriptKey)))
-  }
+      buildKVPair("BATCH_FILE_S3_URL", batch_file_s3_url(scriptBucketName, scriptKeyPrefix, scriptKey))
+    )
+  } 
 
-  def submitJob[F[_]]()( implicit timer: Timer[F], async: Async[F]): Aws[F, SubmitJobResponse] = {
+  def submitJob[F[_]]()(implicit timer: Timer[F], async: Async[F]): Aws[F, SubmitJobResponse] = {
 
-    val taskId = jobDescriptor.key.call.fullyQualifiedName + "-" + jobDescriptor.key.index + "-" + jobDescriptor.key.attempt
+    val taskId =
+      jobDescriptor.key.call.fullyQualifiedName + "-" + jobDescriptor.key.index + "-" + jobDescriptor.key.attempt
 
-    //find or create the script in s3 to execute for s3 fileSystem
-    val scriptKey =  runtimeAttributes.fileSystem match {
-       case AWSBatchStorageSystems.s3  =>  findOrCreateS3Script(reconfiguredScript, runtimeAttributes.scriptS3BucketName)
-       case _ => ""
+    // find or create the script in s3 to execute for s3 fileSystem
+    val scriptKey = runtimeAttributes.fileSystem match {
+      case AWSBatchStorageSystems.s3 => findOrCreateS3Script(reconfiguredScript, runtimeAttributes.scriptS3BucketName)
+      case _ => ""
     }
 
     if(runtimeAttributes.fileSystem == AWSBatchStorageSystems.s3) {
@@ -558,13 +566,12 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       jobPaths.script.addPermission(PosixFilePermission.OTHERS_EXECUTE)
     }
 
-
     val batch_script = runtimeAttributes.fileSystem match {
-       case AWSBatchStorageSystems.s3  => s"s3://${runtimeAttributes.scriptS3BucketName}/$scriptKeyPrefix$scriptKey"
-       case _  => commandScript
+      case AWSBatchStorageSystems.s3 => s"s3://${runtimeAttributes.scriptS3BucketName}/$scriptKeyPrefix$scriptKey"
+      case _ => commandScript
     }
 
-    //calls the client to submit the job
+    // calls the client to submit the job
     def callClient(definitionArn: String, awsBatchAttributes: AwsBatchAttributes): Aws[F, SubmitJobResponse] = {
 
       val workflowId = jobDescriptor.workflowDescriptor.id.toString
@@ -620,16 +627,26 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
         ))
 
       ReaderT.liftF(
-        Stream.retry(submit, 0.millis, duration => duration.plus(duration), awsBatchAttributes.submitAttempts.value, {
-          // RegisterJobDefinition is eventually consistent, so it may not be there
-          case e: ClientException => e.statusCode() == 404
-          case _ => false
-        }).compile.last.map(_.get)) //if successful there is guaranteed to be a value emitted, hence we can .get this option
+        Stream
+          .retry(
+            submit,
+            0.millis,
+            duration => duration.plus(duration),
+            awsBatchAttributes.submitAttempts.value,
+            {
+              // RegisterJobDefinition is eventually consistent, so it may not be there
+              case e: ClientException => e.statusCode() == 404
+              case _ => false
+            }
+          )
+          .compile
+          .last
+          .map(_.get)
+      ) // if successful there is guaranteed to be a value emitted, hence we can .get this option
     }
 
     (findOrCreateDefinition[F]() product Kleisli.ask[F, AwsBatchAttributes]).flatMap((callClient _).tupled)
   }
-
 
   /**
     * Performs an md5 digest the script, checks in s3 bucket for that script, if it's not already there then persists it.
@@ -638,7 +655,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     * @param scriptS3BucketName the bucket that stores the scripts
     * @return the name of the script that was found or created
     */
-  private def findOrCreateS3Script(commandLine :String, scriptS3BucketName: String) :String = {
+  private def findOrCreateS3Script(commandLine: String, scriptS3BucketName: String): String = {
 
     val bucketName = scriptS3BucketName
     // this is md5 digest of the script contents ( == commandLine)
@@ -648,7 +665,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
 
     Log.debug(s"s3 object name for script is calculated to be s3://$bucketName/$scriptKeyPrefix$key")
 
-    try { //try and get the object
+    try { // try and get the object
 
       s3Client.getObject( GetObjectRequest.builder().bucket(bucketName).key( scriptKeyPrefix + key).build )
       s3Client.headObject(HeadObjectRequest.builder()
@@ -660,9 +677,10 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       // if there's no exception then the script already exists
       Log.debug(s"""Found script $bucketName/$scriptKeyPrefix$key""")
     } catch {
-      case _: NoSuchKeyException =>  //this happens if there is no object with that key in the bucket
-        val putRequest = PutObjectRequest.builder()
-          .bucket(bucketName) //remove the "s3://" prefix
+      case _: NoSuchKeyException => // this happens if there is no object with that key in the bucket
+        val putRequest = PutObjectRequest
+          .builder()
+          .bucket(bucketName) // remove the "s3://" prefix
           .key(scriptKeyPrefix + key)
           .build
 
@@ -673,7 +691,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     key
   }
 
-  private def writeReconfiguredScriptForAudit( reconfiguredScript: String, bucketName: String, key: String) = {
+  private def writeReconfiguredScriptForAudit(reconfiguredScript: String, bucketName: String, key: String) = {
     val putObjectRequest = PutObjectRequest.builder().bucket(bucketName).key(key).build()
     s3Client.putObject(putObjectRequest, RequestBody.fromString(reconfiguredScript))
   }
@@ -683,11 +701,10 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     * @return Arn for newly created job definition
     *
     */
-  private def findOrCreateDefinition[F[_]]()
-                                          (implicit async: Async[F], timer: Timer[F]): Aws[F, String] = ReaderT { awsBatchAttributes =>
-
-    // this is a call back that is executed below by the async.recoverWithRetry(retry)
-    val submit = async.delay({
+  private def findOrCreateDefinition[F[_]]()(implicit async: Async[F], timer: Timer[F]): Aws[F, String] = ReaderT {
+    awsBatchAttributes =>
+      // this is a call back that is executed below by the async.recoverWithRetry(retry)
+      val submit = async.delay({
 
       val commandStr = awsBatchAttributes.fileSystem match {
         case AWSBatchStorageSystems.s3 => reconfiguredScript
@@ -710,8 +727,8 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
         tagResources = tagResources
         )
 
-      val jobDefinitionBuilder = StandardAwsBatchJobDefinitionBuilder
-      val jobDefinition = jobDefinitionBuilder.build(jobDefinitionContext)
+        val jobDefinitionBuilder = StandardAwsBatchJobDefinitionBuilder
+        val jobDefinition = jobDefinitionBuilder.build(jobDefinitionContext)
 
 
       //check if there is already a suitable definition based on the calculated job definition name
@@ -723,7 +740,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
         .status("ACTIVE")
         .build()
 
-      val describeJobDefinitionResponse = batchClient.describeJobDefinitions(describeJobDefinitionRequest)
+        val describeJobDefinitionResponse = batchClient.describeJobDefinitions(describeJobDefinitionRequest)
 
       if ( !describeJobDefinitionResponse.jobDefinitions.isEmpty ) {
         //sort the definitions so that the latest revision is at the head
@@ -745,27 +762,33 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     })
 
 
-    // a function to retry submissions, returns a higher kind parameterized on a String (where the String is an arn)
-    val retry: F[String] = Stream.retry(
-      fo = submit, //the value to attempt to get
-      delay = 0.millis, //how long to wait
-      nextDelay = _ * 2, //how long to back off after a failure
-      maxAttempts = awsBatchAttributes.createDefinitionAttempts.value, //how many times to try
-      retriable = { //a function to say if we should retry or not
-        // RegisterJobDefinition throws 404s every once in a while
-        case e: ClientException => e.statusCode() == 404 || e.statusCode() == 409
-        // a 409 means an eventual consistency collision has happened, most likely during a scatter.
-        // Just wait and retry as job definition names are canonical and if another thread succeeds in making one then
-        // that will be used and if there really isn't one, then the definition will be created.
-        case _ => false  //don't retry other cases
-      }
-    ).compile.last.map(_.get)
+      // a function to retry submissions, returns a higher kind parameterized on a String (where the String is an arn)
+      val retry: F[String] = Stream
+        .retry(
+          fo = submit, // the value to attempt to get
+          delay = 0.millis, // how long to wait
+          nextDelay = _ * 2, // how long to back off after a failure
+          maxAttempts = awsBatchAttributes.createDefinitionAttempts.value, // how many times to try
+          retriable = { // a function to say if we should retry or not
+            // RegisterJobDefinition throws 404s every once in a while
+            case e: ClientException => e.statusCode() == 404 || e.statusCode() == 409
+            // a 409 means an eventual consistency collision has happened, most likely during a scatter.
+            // Just wait and retry as job definition names are canonical and if another thread succeeds in making one then
+            // that will be used and if there really isn't one, then the definition will be created.
+            case _ => false // don't retry other cases
+          }
+        )
+        .compile
+        .last
+        .map(_.get)
 
-    // attempt to register the job definition
-    async.recoverWith(submit){
-      case e: ClientException if e.statusCode == 404 ||
-        e.statusCode == 409 || e.statusCode == 429  => retry  //probably worth trying again
-    }
+      // attempt to register the job definition
+      async.recoverWith(submit) {
+        case e: ClientException
+            if e.statusCode == 404 ||
+              e.statusCode == 409 || e.statusCode == 429 =>
+          retry // probably worth trying again
+      }
   }
 
   def registerJobDefinition(jobDefinition: AwsBatchJobDefinition, jobDefinitionContext: AwsBatchJobDefinitionContext): RegisterJobDefinitionResponse = {
@@ -798,8 +821,11 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
   def detail(jobId: String): JobDetail = {
     val describeJobsResponse = batchClient.describeJobs(DescribeJobsRequest.builder.jobs(jobId).build)
 
-    val jobDetail = describeJobsResponse.jobs.asScala.headOption.
-      getOrElse(throw new RuntimeException(s"Expected a job Detail to be present from this request: $describeJobsResponse and this response: $describeJobsResponse "))
+    val jobDetail = describeJobsResponse.jobs.asScala.headOption.getOrElse(
+      throw new RuntimeException(
+        s"Expected a job Detail to be present from this request: $describeJobsResponse and this response: $describeJobsResponse "
+      )
+    )
 
     jobDetail
   }
@@ -809,7 +835,6 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     if (detail.container.exitCode == null) {
         // if exitCode is not present, return failed ( exitCode == 127 for command not found)
         Log.info("rc value missing. Setting to failed and sleeping for 30s...")
-        Thread.sleep(30000)
         127
     } else {
         Log.info("rc value found. Setting to '{}'",detail.container.exitCode.toString())
@@ -827,19 +852,18 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     eventMessages mkString "\n"
   }
 
-  def abort(jobId: String): TerminateJobResponse = {
+  def abort(jobId: String): TerminateJobResponse =
     /*
      * Using Terminate here because it will work on jobs at any stage of their lifecycle whereas cancel will only work
      * on jobs that are not yet at the STARTING or RUNNING phase
      */
     batchClient.terminateJob(TerminateJobRequest.builder.jobId(jobId).reason("cromwell abort called").build())
-  }
 
   /**
     * Generate a `String` describing the instance. Mainly for debugging
     * @return a description of the instance
     */
-  override def toString: String = {
+  override def toString: String =
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
       .append("jobDescriptor", jobDescriptor)
       .append("runtimeAttributes", runtimeAttributes)
@@ -854,5 +878,4 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       .append("configRegion", configRegion)
       .append("awsAuthMode", optAwsAuthMode)
       .build
-  }
 }

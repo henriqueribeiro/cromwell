@@ -38,8 +38,12 @@ import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient
 import software.amazon.awssdk.services.secretsmanager.model.{CreateSecretRequest, SecretsManagerException, SecretListEntry, UpdateSecretRequest}
 import cromwell.filesystems.s3.batch.S3BatchCommandBuilder
-import cromwell.backend.standard.{StandardInitializationActor, StandardInitializationActorParams, StandardValidatedRuntimeAttributesBuilder}
-import cromwell.backend.{BackendConfigurationDescriptor, BackendWorkflowDescriptor, BackendInitializationData}
+import cromwell.backend.standard.{
+  StandardInitializationActor,
+  StandardInitializationActorParams,
+  StandardValidatedRuntimeAttributesBuilder
+}
+import cromwell.backend.{BackendConfigurationDescriptor, BackendInitializationData, BackendWorkflowDescriptor}
 import cromwell.core.io.DefaultIoCommandBuilder
 import cromwell.core.io.AsyncIoActorClient
 import cromwell.core.path.Path
@@ -52,8 +56,7 @@ import cromwell.backend.impl.aws.io.AwsBatchWorkflowPaths
 import scala.concurrent.Future
 import scala.jdk.CollectionConverters._
 
-case class AwsBatchInitializationActorParams
-(
+case class AwsBatchInitializationActorParams(
   workflowDescriptor: BackendWorkflowDescriptor,
   ioActor: ActorRef,
   calls: Set[CommandCallNode],
@@ -65,36 +68,38 @@ case class AwsBatchInitializationActorParams
 }
 
 object AwsBatchInitializationActor {
-  private case class AuthFileAlreadyExistsException(path: Path) extends IOException(s"Failed to upload authentication file at $path:" +
-    s" there was already a file at the same location and this workflow was not being restarted.")
+  private case class AuthFileAlreadyExistsException(path: Path)
+      extends IOException(
+        s"Failed to upload authentication file at $path:" +
+          s" there was already a file at the same location and this workflow was not being restarted."
+      )
 }
 
 class AwsBatchInitializationActor(params: AwsBatchInitializationActorParams)
-  extends StandardInitializationActor(params) with AsyncIoActorClient {
+    extends StandardInitializationActor(params)
+    with AsyncIoActorClient {
 
   val Log: Logger = LoggerFactory.getLogger(AwsBatchInitializationActor.getClass)
 
   override lazy val ioActor = params.ioActor
   private val configuration = params.configuration
-  override implicit val system = context.system
+  implicit override val system = context.system
 
-  override def beforeAll(): Future[Option[BackendInitializationData]] = {
+  override def beforeAll(): Future[Option[BackendInitializationData]] =
     configuration.fileSystem match {
-      case AWSBatchStorageSystems.s3  => super.beforeAll()
-      case _ => {
+      case AWSBatchStorageSystems.s3 => super.beforeAll()
+      case _ =>
         initializationData map { data =>
           publishWorkflowRoot(data.workflowPaths.workflowRoot.pathAsString)
           Option(data)
         }
-      }
     }
-  }
 
   override lazy val runtimeAttributesBuilder: StandardValidatedRuntimeAttributesBuilder =
     AwsBatchRuntimeAttributes.runtimeAttributesBuilder(configuration)
 
   private lazy val provider: Future[AwsCredentialsProvider] =
-    Future { configuration.awsAuth.provider() }
+    Future(configuration.awsAuth.provider())
 
   lazy val secretsClient: SecretsManagerClient = {
     val builder = SecretsManagerClient.builder()
@@ -162,14 +167,14 @@ class AwsBatchInitializationActor(params: AwsBatchInitializationActorParams)
     prov <- provider
   } yield AwsBatchBackendInitializationData(workflowPaths, runtimeAttributesBuilder, configuration, prov)
 
-  override lazy val ioCommandBuilder =  {
+  override lazy val ioCommandBuilder = {
     val conf = Option(configuration) match {
       case Some(cf) => cf
-      case None =>  new  AwsBatchConfiguration(params.configurationDescriptor)
+      case None => new AwsBatchConfiguration(params.configurationDescriptor)
     }
     conf.fileSystem match {
-      case  AWSBatchStorageSystems.s3 =>  S3BatchCommandBuilder
-      case _ =>   DefaultIoCommandBuilder
+      case AWSBatchStorageSystems.s3 => S3BatchCommandBuilder
+      case _ => DefaultIoCommandBuilder
     }
   }
 }

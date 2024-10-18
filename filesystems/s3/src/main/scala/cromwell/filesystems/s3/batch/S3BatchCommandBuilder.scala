@@ -83,12 +83,12 @@ private case object PartialS3BatchCommandBuilder extends PartialIoCommandBuilder
     case local_path: Path => Try(DefaultIoHashCommand(local_path))
   }
 
-  override def touchCommand: PartialFunction[Path, Try[S3BatchTouchCommand]] = {
-    case path: S3Path => Try(S3BatchTouchCommand(path))
+  override def touchCommand: PartialFunction[Path, Try[S3BatchTouchCommand]] = { case path: S3Path =>
+    Try(S3BatchTouchCommand(path))
   }
 
-  override def existsCommand: PartialFunction[Path, Try[S3BatchExistsCommand]] = {
-    case path: S3Path => Try(S3BatchExistsCommand(path))
+  override def existsCommand: PartialFunction[Path, Try[S3BatchExistsCommand]] = { case path: S3Path =>
+    Try(S3BatchExistsCommand(path))
   }
 }
 

@@ -33,7 +33,7 @@ package cromwell.backend.impl.aws
 
 import cromwell.filesystems.s3.S3PathBuilderFactory
 import cromwell.backend.BackendConfigurationDescriptor
-import cromwell.core.{BackendDockerConfiguration}
+import cromwell.core.BackendDockerConfiguration
 import cromwell.core.path.PathBuilderFactory
 import cromwell.cloudsupport.aws.AwsConfiguration
 
@@ -47,12 +47,13 @@ class AwsBatchConfiguration(val configurationDescriptor: BackendConfigurationDes
   val awsAuth = batchAttributes.auth
   val fileSystem =
     configurationDescriptor.backendConfig.hasPath("filesystems.s3") match {
-      case true =>  "s3"
+      case true => "s3"
       case false => "local"
-  }
+    }
   val pathBuilderFactory = configurationDescriptor.backendConfig.hasPath("filesystems.s3") match {
     case true => S3PathBuilderFactory(configurationDescriptor.globalConfig, configurationDescriptor.backendConfig)
-    case false => PathBuilderFactory
+    case false =>
+      PathBuilderFactory
   }
   val dockerCredentials = BackendDockerConfiguration.build(configurationDescriptor.backendConfig).dockerCredentials
   val dockerToken: Option[String] = dockerCredentials map { _.token }
@@ -66,9 +67,8 @@ class AwsBatchConfiguration(val configurationDescriptor: BackendConfigurationDes
 }
 
 object AWSBatchStorageSystems {
-  val s3:String = "s3"
-  val efs:String = "efs"
-  val ebs:String = "ebs"
-  val local:String = "local"
+  val s3: String = "s3"
+  val efs: String = "efs"
+  val ebs: String = "ebs"
+  val local: String = "local"
 }
-

@@ -44,9 +44,8 @@ import cromwell.core.path.Path
 trait AwsBatchJobCachingActorHelper extends StandardCachingActorHelper {
   this: Actor with JobLogging =>
 
-  lazy val initializationData: AwsBatchBackendInitializationData = {
+  lazy val initializationData: AwsBatchBackendInitializationData =
     backendInitializationDataAs[AwsBatchBackendInitializationData]
-  }
 
   lazy val configuration: AwsBatchConfiguration = initializationData.configuration
 

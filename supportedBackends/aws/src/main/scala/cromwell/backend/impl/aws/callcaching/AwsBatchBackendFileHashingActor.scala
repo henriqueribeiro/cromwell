@@ -40,12 +40,16 @@ import scala.util.Try
 import cromwell.backend.standard.callcaching.StandardFileHashingActor.SingleFileHashRequest
 import cromwell.core.path.DefaultPathBuilder
 
-class AwsBatchBackendFileHashingActor(standardParams: StandardFileHashingActorParams) extends StandardFileHashingActor(standardParams) {
+class AwsBatchBackendFileHashingActor(standardParams: StandardFileHashingActorParams)
+    extends StandardFileHashingActor(standardParams) {
 
-  override val ioCommandBuilder = BackendInitializationData.as[AwsBatchBackendInitializationData](standardParams.backendInitializationDataOption)
-    .configuration.batchAttributes.fileSystem match {
-       case AWSBatchStorageSystems.s3  => S3BatchCommandBuilder
-       case _ =>  DefaultIoCommandBuilder
+  override val ioCommandBuilder = BackendInitializationData
+    .as[AwsBatchBackendInitializationData](standardParams.backendInitializationDataOption)
+    .configuration
+    .batchAttributes
+    .fileSystem match {
+    case AWSBatchStorageSystems.s3 => S3BatchCommandBuilder
+    case _ => DefaultIoCommandBuilder
   }
   // get backend config.
   val aws_config = BackendInitializationData.as[AwsBatchBackendInitializationData](standardParams.backendInitializationDataOption).configuration

@@ -54,22 +54,25 @@ object AwsBatchWorkflowPaths {
  */
 case class AwsBatchWorkflowPaths(workflowDescriptor: BackendWorkflowDescriptor,
                                  provider: AwsCredentialsProvider,
-                                 configuration: AwsBatchConfiguration)(implicit actorSystem: ActorSystem) extends WorkflowPaths {
+                                 configuration: AwsBatchConfiguration
+)(implicit actorSystem: ActorSystem)
+    extends WorkflowPaths {
 
-  override lazy val executionRootString: String =  configuration.fileSystem match {
-    case AWSBatchStorageSystems.s3  => workflowDescriptor.workflowOptions.getOrElse(AwsBatchWorkflowPaths.RootOptionKey, configuration.root)
+  override lazy val executionRootString: String = configuration.fileSystem match {
+    case AWSBatchStorageSystems.s3 =>
+      workflowDescriptor.workflowOptions.getOrElse(AwsBatchWorkflowPaths.RootOptionKey, configuration.root)
     case _ => configuration.root
   }
   private val workflowOptions: WorkflowOptions = workflowDescriptor.workflowOptions
 
-  override def toJobPaths(workflowPaths: WorkflowPaths, jobKey: BackendJobDescriptorKey): AwsBatchJobPaths = {
+  override def toJobPaths(workflowPaths: WorkflowPaths, jobKey: BackendJobDescriptorKey): AwsBatchJobPaths =
     new AwsBatchJobPaths(workflowPaths.asInstanceOf[AwsBatchWorkflowPaths], jobKey)
-  }
 
-  override protected def withDescriptor(workflowDescriptor: BackendWorkflowDescriptor): WorkflowPaths = this.copy(workflowDescriptor = workflowDescriptor)
+  override protected def withDescriptor(workflowDescriptor: BackendWorkflowDescriptor): WorkflowPaths =
+    this.copy(workflowDescriptor = workflowDescriptor)
 
   override def config: Config = configuration.configurationDescriptor.backendConfig
-  override def pathBuilders: List[PathBuilder] = {
+  override def pathBuilders: List[PathBuilder] =
     if (configuration.fileSystem == "s3") {
       // if efs is activated : add the default (local) pathbuilders.
       if (configuration.batchAttributes.efsMntPoint.isDefined) {
@@ -81,5 +84,5 @@ case class AwsBatchWorkflowPaths(workflowDescriptor: BackendWorkflowDescriptor,
     } else {
       WorkflowPaths.DefaultPathBuilders
     }
-  }
 }
+
