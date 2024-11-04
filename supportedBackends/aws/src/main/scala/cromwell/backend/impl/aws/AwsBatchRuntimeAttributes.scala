@@ -42,13 +42,14 @@ import eu.timepit.refined.api.Refined
 import eu.timepit.refined.numeric.Positive
 import wom.RuntimeAttributesKeys
 import wom.format.MemorySize
+import wdl4s.parser.MemoryUnit
 import wom.types._
 import wom.values._
 import com.typesafe.config.{ConfigException, ConfigValueFactory}
 
 import scala.util.matching.Regex
 import org.slf4j.{Logger, LoggerFactory}
-import wom.RuntimeAttributesKeys.{GpuKey, sharedMemoryKey}
+import wom.RuntimeAttributesKeys.{GpuKey } // , sharedMemoryKey}
 
 import scala.util.{Failure, Success, Try}
 import scala.jdk.CollectionConverters._
@@ -94,7 +95,7 @@ case class AwsBatchRuntimeAttributes(cpu: Int Refined Positive,
                                      ulimits: Vector[Map[String, String]],
                                      efsDelocalize: Boolean,
                                      efsMakeMD5 : Boolean,
-                                     sharedMemorySize: Int Refined Positive,
+                                     sharedMemorySize: MemorySize,
                                      logGroupName: String,
                                      additionalTags: Map[String, String],
                                      fileSystem: String= "s3",
@@ -110,7 +111,7 @@ object AwsBatchRuntimeAttributes {
 
   val awsBatchEvaluateOnExitKey = "awsBatchEvaluateOnExit"
 
-  val defaultSharedMemorySize = WomInteger(64)
+  val defaultSharedMemorySize = MemorySize(64, MemoryUnit.MB)
 
   private val awsBatchEvaluateOnExitDefault = WomArray(WomArrayType(WomMapType(WomStringType,WomStringType)), Vector(WomMap(Map.empty[WomValue, WomValue])))
 
@@ -179,9 +180,10 @@ object AwsBatchRuntimeAttributes {
     noAddressValidationInstance
       .withDefault(noAddressValidationInstance.configDefaultWomValue(runtimeConfig) getOrElse NoAddressDefaultValue)
 
-  private def sharedMemorySizeValidation(runtimeConfig: Option[Config]):  RuntimeAttributesValidation[Refined[Int, Positive]] = {
-    SharedMemorySizeValidation(sharedMemoryKey).withDefault(
-      SharedMemorySizeValidation(sharedMemoryKey).configDefaultWomValue(runtimeConfig).getOrElse(defaultSharedMemorySize)
+  private def sharedMemorySizeValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[MemorySize] = {
+    MemoryValidation.withDefaultMemory(
+      RuntimeAttributesKeys.sharedMemoryKey,
+      MemoryValidation.configDefaultString(RuntimeAttributesKeys.sharedMemoryKey, runtimeConfig) getOrElse defaultSharedMemorySize.toString
     )
   }
 
@@ -337,7 +339,7 @@ object AwsBatchRuntimeAttributes {
     val efsDelocalize: Boolean = RuntimeAttributesValidation.extract(awsBatchefsDelocalizeValidation(runtimeAttrsConfig),validatedRuntimeAttributes)
     val efsMakeMD5: Boolean = RuntimeAttributesValidation.extract(awsBatchefsMakeMD5Validation(runtimeAttrsConfig),validatedRuntimeAttributes)
     val tagResources: Boolean = RuntimeAttributesValidation.extract(awsBatchtagResourcesValidation(runtimeAttrsConfig),validatedRuntimeAttributes)
-    val sharedMemorySize: Int Refined Positive = RuntimeAttributesValidation.extract(sharedMemorySizeValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
+    val sharedMemorySize: MemorySize = RuntimeAttributesValidation.extract(sharedMemorySizeValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
 
     new AwsBatchRuntimeAttributes(
       cpu,
@@ -707,12 +709,6 @@ class AwsBatchtagResourcesValidation(key: String) extends BooleanRuntimeAttribut
 
   override protected def missingValueMessage: String = s"Expecting $key runtime attribute to be a Boolean"
 }
-
-object SharedMemorySizeValidation {
-  def apply(key: String): SharedMemorySizeValidation = new SharedMemorySizeValidation(key)
-}
-
-class SharedMemorySizeValidation(key: String) extends PositiveIntRuntimeAttributesValidation(key)
 
 object UlimitsValidation
     extends RuntimeAttributesValidation[Vector[Map[String, String]]] {
