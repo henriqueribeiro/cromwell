@@ -10,7 +10,7 @@ import wom.values._
 
 import scala.runtime.ScalaRunTime
 import scala.util.Random
-
+import scala.util.matching.Regex
 
 class WomTypeSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matchers {
   "WomType class" should "stringify WomBoolean to 'Boolean'" in {
@@ -32,7 +32,7 @@ class WomTypeSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matchers {
     WomSingleFileType.stableName shouldEqual "File"
   }
 
-  val rawValuesCoercedToType = Table(
+  val rawValuesCoercedToType = Table[Any, WomType, Any, Regex](
     (
       "Raw Value",
       "WomType",
@@ -43,66 +43,68 @@ class WomTypeSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matchers {
       WomString("hello"),
       WomIntegerType,
       classOf[NumberFormatException],
-      "For input string: \"hello\""
+      "For input string: \"hello\"".r
     ),
     (
       WomInteger(0),
       WomBooleanType,
       classOf[IllegalArgumentException],
-      """No coercion defined from wom value\(s\) '0' of type 'Int' to 'Boolean'."""
+      """No coercion defined from wom value\(s\) '0' of type 'Int' to 'Boolean'.""".r
     ),
     (
       0,
       WomBooleanType,
       classOf[IllegalArgumentException],
-      "No coercion defined from '0' of type 'java.lang.Integer' to 'Boolean'."
+      "No coercion defined from '0' of type 'java.lang.Integer' to 'Boolean'.".r
     ),
     (
       Array(0, 1, 2, 3, 4),
       WomBooleanType,
       classOf[IllegalArgumentException],
-      """No coercion defined from 'Array\(0, 1, 2\)' of type 'int\[\]' to 'Boolean'."""
+      """No coercion defined from 'Array\(0, 1, 2\)' of type 'int\[\]' to 'Boolean'.""".r
     ),
     (
       new AnyRef {},
       WomBooleanType,
       classOf[IllegalArgumentException],
-      "No coercion defined from" +
+      ("No coercion defined from" +
         """ 'wom.types.WomTypeSpec\$\$anon\$(.*)@.*' of type""" +
-        """ 'wom.types.WomTypeSpec\$\$anon\$\1' to 'Boolean'."""
+        """ 'wom.types.WomTypeSpec\$\$anon\$\1' to 'Boolean'.""").r
     ),
     (
-      WomArray(WomArrayType(WomOptionalType(WomIntegerType)), Seq(
-        WomOptionalValue(WomInteger(0)),
-        WomOptionalValue(WomInteger(1)),
-        WomOptionalValue(WomInteger(2)),
-        WomOptionalValue(WomInteger(3)),
-        WomOptionalValue(WomInteger(4)))
+      WomArray(
+        WomArrayType(WomOptionalType(WomIntegerType)),
+        Seq(
+          WomOptionalValue(WomInteger(0)),
+          WomOptionalValue(WomInteger(1)),
+          WomOptionalValue(WomInteger(2)),
+          WomOptionalValue(WomInteger(3)),
+          WomOptionalValue(WomInteger(4))
+        )
       ),
       WomOptionalType(WomMaybeEmptyArrayType(WomIntegerType)),
       classOf[IllegalArgumentException],
-      """No coercion defined from wom value\(s\) '\[0, 1, 2\]' of type 'Array\[Int\?\]' to 'Array\[Int\]\?'."""
+      """No coercion defined from wom value\(s\) '\[0, 1, 2\]' of type 'Array\[Int\?\]' to 'Array\[Int\]\?'.""".r
     ),
     (
       WomArray(WomArrayType(WomOptionalType(WomIntegerType)), Seq(WomOptionalValue.none(WomIntegerType))),
       WomOptionalType(WomMaybeEmptyArrayType(WomIntegerType)),
       classOf[IllegalArgumentException],
-      """No coercion defined from wom value\(s\) '\[null\]' of type 'Array\[Int\?\]' to 'Array\[Int\]\?'."""
+      """No coercion defined from wom value\(s\) '\[null\]' of type 'Array\[Int\?\]' to 'Array\[Int\]\?'.""".r
     ),
     (
       WomOptionalValue.none(WomArrayType(WomIntegerType)),
       WomMaybeEmptyArrayType(WomOptionalType(WomIntegerType)),
       classOf[IllegalArgumentException],
-      """No coercion defined from wom value\(s\) 'null' of type 'Array\[Int\]\?' to 'Array\[Int\?\]'."""
+      """No coercion defined from wom value\(s\) 'null' of type 'Array\[Int\]\?' to 'Array\[Int\?\]'.""".r
     )
   )
 
-  private def describe(any: Any): String = {
+  private def describe(any: Any): String =
     any match {
       case womValue: WomValue => s"wom value ${womValue.toWomString} of type ${womValue.womType.stableName}"
       case _ => s"scala value ${ScalaRunTime.stringOf(any)}"
     }
-  }
 
   forAll(rawValuesCoercedToType) { (rawValue, womType, exceptionClass, exceptionMessage) =>
     it should s"fail coercing ${womType.stableName} from ${describe(rawValue)}" in {
@@ -116,25 +118,33 @@ class WomTypeSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matchers {
     WomBooleanType.coerceRawValue("true").get shouldEqual WomBoolean.True
     WomBooleanType.coerceRawValue("FALSE").get shouldEqual WomBoolean.False
     WomBooleanType.coerceRawValue(false).get shouldEqual WomBoolean.False
-    WomBooleanType.coerceRawValue(WomOptionalValue(WomBooleanType, Option(WomBoolean(true)))).get shouldEqual WomBoolean.True
+    WomBooleanType
+      .coerceRawValue(WomOptionalValue(WomBooleanType, Option(WomBoolean(true))))
+      .get shouldEqual WomBoolean.True
     WomBooleanType.coerceRawValue("I like turtles").isFailure shouldBe true
   }
 
   "WomString" should "support expected coercions" in {
     WomStringType.coerceRawValue("foo").get shouldEqual WomString("foo")
-    WomStringType.coerceRawValue(WomOptionalValue(WomStringType, Option(WomString("foo")))).get shouldEqual WomString("foo")
+    WomStringType.coerceRawValue(WomOptionalValue(WomStringType, Option(WomString("foo")))).get shouldEqual WomString(
+      "foo"
+    )
     WomStringType.coerceRawValue(-1).isFailure shouldBe true
   }
 
   "WomFile" should "support expected coercions" in {
     WomSingleFileType.coerceRawValue("/etc/passwd").get shouldEqual WomSingleFile("/etc/passwd")
-    WomSingleFileType.coerceRawValue(WomOptionalValue(WomSingleFileType, Option(WomSingleFile("/etc/passwd")))).get shouldEqual WomSingleFile("/etc/passwd")
+    WomSingleFileType
+      .coerceRawValue(WomOptionalValue(WomSingleFileType, Option(WomSingleFile("/etc/passwd"))))
+      .get shouldEqual WomSingleFile("/etc/passwd")
     WomSingleFileType.coerceRawValue(-1).isFailure shouldBe true
   }
 
   "WomInteger" should "support expected coercions" in {
     WomIntegerType.coerceRawValue(42).get shouldEqual WomInteger(42)
-    WomIntegerType.coerceRawValue(WomOptionalValue(WomIntegerType, Option(WomInteger(42)))).get shouldEqual WomInteger(42)
+    WomIntegerType.coerceRawValue(WomOptionalValue(WomIntegerType, Option(WomInteger(42)))).get shouldEqual WomInteger(
+      42
+    )
     WomIntegerType.coerceRawValue("42").get shouldEqual WomInteger(42)
     WomIntegerType.coerceRawValue(JsString("42")).get shouldEqual WomInteger(42)
     WomIntegerType.coerceRawValue("FAIL").isFailure shouldBe true
@@ -166,26 +176,49 @@ class WomTypeSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matchers {
   // Type A in, Type B in, expected results
   val lcsTestCases: List[(List[WomType], WomType)] = List(
     (List(WomIntegerType, WomStringType), WomStringType),
-    (List(WomPairType(WomStringType, WomIntegerType), WomPairType(WomIntegerType, WomStringType)), WomPairType(WomStringType, WomStringType)),
+    (List(WomPairType(WomStringType, WomIntegerType), WomPairType(WomIntegerType, WomStringType)),
+     WomPairType(WomStringType, WomStringType)
+    ),
     (List(WomOptionalType(WomIntegerType), WomOptionalType(WomStringType)), WomOptionalType(WomStringType)),
     (List(WomOptionalType(WomIntegerType), WomStringType), WomOptionalType(WomStringType)),
-    (List(WomArrayType(WomOptionalType(WomIntegerType)), WomArrayType(WomOptionalType(WomStringType))), WomArrayType(WomOptionalType(WomStringType))),
-    (List(WomOptionalType(WomMapType(WomIntegerType, WomStringType)), WomOptionalType(WomMapType(WomStringType, WomIntegerType))), WomOptionalType(WomMapType(WomStringType, WomStringType))),
+    (List(WomArrayType(WomOptionalType(WomIntegerType)), WomArrayType(WomOptionalType(WomStringType))),
+     WomArrayType(WomOptionalType(WomStringType))
+    ),
+    (List(WomOptionalType(WomMapType(WomIntegerType, WomStringType)),
+          WomOptionalType(WomMapType(WomStringType, WomIntegerType))
+     ),
+     WomOptionalType(WomMapType(WomStringType, WomStringType))
+    ),
     (List(
-      WomCompositeType(Map(
-        "i" -> WomIntegerType,
-        "s" -> WomStringType
-      )),
-      WomCompositeType(Map(
-        "a" -> WomStringType,
-        "b" -> WomIntegerType
-      ))
-    ), WomObjectType),
+       WomCompositeType(
+         Map(
+           "i" -> WomIntegerType,
+           "s" -> WomStringType
+         )
+       ),
+       WomCompositeType(
+         Map(
+           "a" -> WomStringType,
+           "b" -> WomIntegerType
+         )
+       )
+     ),
+     WomObjectType
+    ),
     (List(WomIntegerType, WomFloatType), WomFloatType),
     (List(WomIntegerType, WomBooleanType), WomStringType),
-    (List(WomOptionalType(WomMaybeEmptyArrayType(WomSingleFileType)), WomMaybeEmptyArrayType(WomNothingType)), WomOptionalType(WomMaybeEmptyArrayType(WomSingleFileType))),
-    (List(WomMaybeEmptyArrayType(WomSingleFileType), WomMaybeEmptyArrayType(WomNothingType)), WomMaybeEmptyArrayType(WomSingleFileType)),
-    (List(WomMaybeEmptyArrayType(WomStringType), WomMaybeEmptyArrayType(WomIntegerType), WomMaybeEmptyArrayType(WomNothingType)), WomMaybeEmptyArrayType(WomStringType))
+    (List(WomOptionalType(WomMaybeEmptyArrayType(WomSingleFileType)), WomMaybeEmptyArrayType(WomNothingType)),
+     WomOptionalType(WomMaybeEmptyArrayType(WomSingleFileType))
+    ),
+    (List(WomMaybeEmptyArrayType(WomSingleFileType), WomMaybeEmptyArrayType(WomNothingType)),
+     WomMaybeEmptyArrayType(WomSingleFileType)
+    ),
+    (List(WomMaybeEmptyArrayType(WomStringType),
+          WomMaybeEmptyArrayType(WomIntegerType),
+          WomMaybeEmptyArrayType(WomNothingType)
+     ),
+     WomMaybeEmptyArrayType(WomStringType)
+    )
   )
 
   lcsTestCases foreach { case (types, expectedLcs) =>

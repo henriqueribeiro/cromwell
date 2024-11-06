@@ -18,17 +18,17 @@ filesystems {
         # Class to instantiate and propagate to all factories. Takes a single typesafe config argument
         class = "cromwell.filesystems.drs.DrsFileSystemConfig"
         config {
-          martha {
-            url = "https://martha-url-here"
+          resolver {
+            url = https://drshub-url-here"
             # The number of times to retry failures connecting or HTTP 429 or HTTP 5XX responses, default 3.
             num-retries = 3
             # How long to wait between retrying HTTP 429 or HTTP 5XX responses, default 10 seconds.
-            wait-initial = 10 seconds
+            wait-initial = 30 seconds
             # The maximum amount of time to wait between retrying HTTP 429 or HTTP 5XX responses, default 30 seconds.
-            wait-maximum = 30 seconds
+            wait-maximum = 60 seconds
             # The amount to multiply the amount of time to wait between retrying HTTP or 429 or HTTP 5XX responses.
-            # Default 2.0, and will never multiply the wait time more than wait-maximum.
-            wait-mulitiplier = 2.0
+            # Default 1.25, and will never multiply the wait time more than wait-maximum.
+            wait-mulitiplier = 1.25
             # The randomization factor to use for creating a range around the wait interval.
             # A randomization factor of 0.5 results in a random period ranging between 50% below and 50% above the wait
             # interval. Default 0.1.
@@ -149,11 +149,6 @@ engine {
   }
 }
 ```
-
-#### Engine filesystems and CWL
-
-Note that CWL *always* needs to access file attributes from within the engine, so if you are using CWL, please make sure
-that **every filesystem you might use** is added to the `engine.filesystems` stanza.
 
 ### Backend Filesystems
 

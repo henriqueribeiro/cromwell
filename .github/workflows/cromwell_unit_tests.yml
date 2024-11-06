@@ -1,0 +1,37 @@
+name: 'Cromwell unit tests'
+
+#This github action runs all of Cromwell's unit tests.
+
+#This is what shows up in the github workflows page as the title. 
+run-name: ${{ github.actor }} running Cromwell sbt unit tests.
+
+#What will trigger the workflow to run. 
+on:
+  workflow_dispatch: #Manual trigger from GitHub UI
+  push:
+  merge_group:
+
+permissions: 
+  contents: read
+
+jobs:
+  build-and-test: 
+    #This action is using a Github free runner, rather than a Broad self-hosted one.
+    #This is because the Broad ones don't have sbt installed by default.
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3 # checkout the cromwell repo
+    - uses: ./.github/set_up_cromwell_action #Exectute this reusable github action. It will set up java/sbt/git-secrets/cromwell.
+      with:
+        cromwell_repo_token: ${{ secrets.BROADBOT_GITHUB_TOKEN }}
+  
+    #Invoke SBT to run all unit tests for Cromwell. 
+    - name: Run tests
+      env:
+        AZURE_CLIENT_ID: ${{ secrets.VAULT_AZURE_CENTAUR_CLIENT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.VAULT_AZURE_CENTAUR_CLIENT_SECRET }}
+        AZURE_TENANT_ID: ${{ secrets.VAULT_AZURE_CENTAUR_TENANT_ID }}
+      run: |
+        set -e
+        sbt "test"

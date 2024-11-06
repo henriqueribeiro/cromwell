@@ -4,8 +4,7 @@ import java.sql.Timestamp
 
 import javax.sql.rowset.serial.{SerialBlob, SerialClob}
 
-case class WorkflowStoreEntry
-(
+case class WorkflowStoreEntry(
   workflowExecutionUuid: String,
   workflowDefinition: Option[SerialClob],
   workflowUrl: Option[String],
@@ -21,5 +20,5 @@ case class WorkflowStoreEntry
   cromwellId: Option[String],
   heartbeatTimestamp: Option[Timestamp],
   hogGroup: Option[String],
-  workflowStoreEntryId: Option[Int] = None
+  workflowStoreEntryId: Option[Long] = None
 )

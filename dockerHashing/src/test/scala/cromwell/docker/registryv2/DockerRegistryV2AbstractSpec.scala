@@ -3,10 +3,10 @@ package cromwell.docker.registryv2
 import cats.effect.{IO, Resource}
 import common.assertion.CromwellTimeoutSpec
 import cromwell.docker.DockerInfoActor.{DockerInfoContext, DockerInfoFailedResponse}
-import cromwell.docker.{DockerImageIdentifier, DockerInfoActor, DockerInfoRequest, DockerRegistryConfig}
+import cromwell.docker._
+import org.http4s._
 import org.http4s.client.Client
 import org.http4s.headers.`Content-Type`
-import org.http4s.{Header, Headers, MediaType, Request, Response}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -20,18 +20,21 @@ class DockerRegistryV2AbstractSpec extends AnyFlatSpec with CromwellTimeoutSpec 
       override protected def buildTokenRequestHeaders(dockerInfoContext: DockerInfoActor.DockerInfoContext) = List.empty
     }
 
-    val mediaType = MediaType.parse(DockerRegistryV2Abstract.ManifestV2MediaType).toOption.get
+    val mediaType = MediaType.parse(DockerRegistryV2Abstract.DockerManifestV2MediaType).toOption.get
     val contentType: Header = `Content-Type`(mediaType)
 
-    val mockClient = Client({ _: Request[IO] =>
+    val mockClient = Client { _: Request[IO] =>
       // This response will have an empty body, so we need to be explicit about the typing:
-      Resource.pure[IO, Response[IO]](Response(headers = Headers.of(contentType))) : Resource[IO, Response[IO]]
-    })
+      Resource.pure[IO, Response[IO]](Response(headers = Headers.of(contentType))): Resource[IO, Response[IO]]
+    }
 
     val dockerImageIdentifier = DockerImageIdentifier.fromString("ubuntu").get
     val dockerInfoRequest = DockerInfoRequest(dockerImageIdentifier)
     val context = DockerInfoContext(dockerInfoRequest, null)
     val result = registry.run(context)(mockClient).unsafeRunSync()
-    result.asInstanceOf[(DockerInfoFailedResponse, DockerInfoContext)]._1.reason shouldBe "Failed to get docker hash for ubuntu:latest Malformed message body: Invalid JSON: empty body"
+    result
+      .asInstanceOf[(DockerInfoFailedResponse, DockerInfoContext)]
+      ._1
+      .reason shouldBe "Failed to get docker hash for ubuntu:latest Malformed message body: Invalid JSON: empty body"
   }
 }

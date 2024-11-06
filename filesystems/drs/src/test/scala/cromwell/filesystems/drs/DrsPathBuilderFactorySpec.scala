@@ -6,7 +6,7 @@ import cromwell.core.filesystem.CromwellFileSystems
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-class DrsPathBuilderFactorySpec extends AnyFlatSpec with CromwellTimeoutSpec with Matchers{
+class DrsPathBuilderFactorySpec extends AnyFlatSpec with CromwellTimeoutSpec with Matchers {
 
   behavior of "DrsPathBuilderFactory"
 
@@ -18,8 +18,8 @@ class DrsPathBuilderFactorySpec extends AnyFlatSpec with CromwellTimeoutSpec wit
          |    global {
          |      class = "cromwell.filesystems.drs.DrsFileSystemConfig"
          |      config {
-         |        martha {
-         |          url = "http://martha-url"
+         |        resolver {
+         |          url = "http://drshub-url"
          |        }
          |      }
          |    }

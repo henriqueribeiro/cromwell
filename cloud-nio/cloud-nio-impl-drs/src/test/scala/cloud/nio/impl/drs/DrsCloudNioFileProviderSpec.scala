@@ -25,15 +25,15 @@ class DrsCloudNioFileProviderSpec extends AnyFlatSpecLike with CromwellTimeoutSp
 
   it should "parse a config and create a working file system provider" in {
     val config = ConfigFactory.parseString(
-      """martha.url = "https://from.config"
+      """resolver.url = "https://from.config"
         |access-token-acceptable-ttl = 1 minute
         |""".stripMargin
     )
 
     val fileSystemProvider = new MockDrsCloudNioFileSystemProvider(config = config)
-    fileSystemProvider.drsConfig.marthaUrl should be("https://from.config")
+    fileSystemProvider.drsConfig.drsResolverUrl should be("https://from.config")
     fileSystemProvider.drsCredentials match {
-      case GoogleDrsCredentials(_, ttl) => ttl should be(1.minute)
+      case GoogleOauthDrsCredentials(_, ttl) => ttl should be(1.minute)
       case error => fail(s"Expected GoogleDrsCredentials, found $error")
     }
     fileSystemProvider.fileProvider should be(a[DrsCloudNioFileProvider])
@@ -52,11 +52,10 @@ class DrsCloudNioFileProviderSpec extends AnyFlatSpecLike with CromwellTimeoutSp
       "drs://dg.4DFC:0027045b-9ed6-45af-a68e-f55037b5184c",
       "drs://dg.4503:dg.4503/fc046e84-6cf9-43a3-99cc-ffa2964b88cb",
       "drs://dg.ANV0:dg.ANV0/0db6577e-57bd-48a1-93c6-327c292bcb6b",
-      "drs://dg.F82A1A:ed6be7ab-068e-46c8-824a-f39cfbb885cc",
+      "drs://dg.F82A1A:ed6be7ab-068e-46c8-824a-f39cfbb885cc"
     )
-    for (exampleUri <- exampleUris) {
+    for (exampleUri <- exampleUris)
       fileSystemProvider.getHost(exampleUri) should be(exampleUri)
-    }
   }
 
   it should "check existing drs objects" in {
@@ -78,70 +77,62 @@ class DrsCloudNioFileProviderSpec extends AnyFlatSpecLike with CromwellTimeoutSp
   }
 
   it should "return a file provider that can read bytes from gcs" in {
-    val drsPathResolver = new MockEngineDrsPathResolver() {
-      override def resolveDrsThroughMartha(drsPath: String,
-                                           fields: NonEmptyList[MarthaField.Value],
-                                          ): IO[MarthaResponse] = {
-        IO(MarthaResponse(gsUri = Option("gs://bucket/object/path")))
-      }
+    val drsPathResolver = new MockDrsPathResolver() {
+      override def resolveDrs(drsPath: String, fields: NonEmptyList[DrsResolverField.Value]): IO[DrsResolverResponse] =
+        IO(DrsResolverResponse(gsUri = Option("gs://bucket/object/path")))
     }
 
     val readChannel = mock[ReadableByteChannel]
-    val drsReadInterpreter: DrsReadInterpreter = (_, marthaResponse) => {
+    val drsReadInterpreter: DrsReadInterpreter = (_, drsResolverResponse) =>
       IO(
-        (marthaResponse.gsUri, marthaResponse.googleServiceAccount) match {
+        (drsResolverResponse.gsUri, drsResolverResponse.googleServiceAccount) match {
           case (Some("gs://bucket/object/path"), None) => readChannel
-          case _ => fail(s"Unexpected parameters passed: $marthaResponse")
+          case _ => fail(s"Unexpected parameters passed: $drsResolverResponse")
         }
       )
-    }
 
     val fileSystemProvider = new MockDrsCloudNioFileSystemProvider(
       mockResolver = Option(drsPathResolver),
-      drsReadInterpreter = drsReadInterpreter,
+      drsReadInterpreter = drsReadInterpreter
     )
     fileSystemProvider.fileProvider.read("dg.123", "abc", 0) should be(readChannel)
   }
 
   it should "return a file provider that can read bytes from an access url" in {
-    val drsPathResolver = new MockEngineDrsPathResolver() {
-      override def resolveDrsThroughMartha(drsPath: String,
-                                           fields: NonEmptyList[MarthaField.Value],
-                                          ): IO[MarthaResponse] = {
-        IO(MarthaResponse(accessUrl = Option(AccessUrl("https://host/object/path", None))))
-      }
+    val drsPathResolver = new MockDrsPathResolver() {
+      override def resolveDrs(drsPath: String, fields: NonEmptyList[DrsResolverField.Value]): IO[DrsResolverResponse] =
+        IO(DrsResolverResponse(accessUrl = Option(AccessUrl("https://host/object/path", None))))
     }
 
     val readChannel = mock[ReadableByteChannel]
-    val drsReadInterpreter: DrsReadInterpreter = (_, marthaResponse) => {
+    val drsReadInterpreter: DrsReadInterpreter = (_, drsResolverResponse) =>
       IO(
-        marthaResponse.accessUrl match {
+        drsResolverResponse.accessUrl match {
           case Some(AccessUrl("https://host/object/path", None)) => readChannel
-          case _ => fail(s"Unexpected parameters passed: $marthaResponse")
+          case _ => fail(s"Unexpected parameters passed: $drsResolverResponse")
         }
       )
-    }
 
     val fileSystemProvider = new MockDrsCloudNioFileSystemProvider(
       mockResolver = Option(drsPathResolver),
-      drsReadInterpreter = drsReadInterpreter,
+      drsReadInterpreter = drsReadInterpreter
     )
     fileSystemProvider.fileProvider.read("dg.123", "abc", 0) should be(readChannel)
   }
 
   it should "return a file provider that can return file attributes" in {
-    val drsPathResolver = new MockEngineDrsPathResolver() {
-      override def resolveDrsThroughMartha(drsPath: String,
-                                           fields: NonEmptyList[MarthaField.Value],
-                                          ): IO[MarthaResponse] = {
+    val drsPathResolver = new MockDrsPathResolver() {
+      override def resolveDrs(drsPath: String,
+                              fields: NonEmptyList[DrsResolverField.Value]
+      ): IO[DrsResolverResponse] = {
         val instantCreated = Instant.ofEpochMilli(123L)
         val instantUpdated = Instant.ofEpochMilli(456L)
         IO(
-          MarthaResponse(
+          DrsResolverResponse(
             size = Option(789L),
             timeCreated = Option(OffsetDateTime.ofInstant(instantCreated, ZoneOffset.UTC).toString),
             timeUpdated = Option(OffsetDateTime.ofInstant(instantUpdated, ZoneOffset.UTC).toString),
-            hashes = Option(Map("md5" -> "gg0217869")),
+            hashes = Option(Map("md5" -> "gg0217869"))
           )
         )
       }

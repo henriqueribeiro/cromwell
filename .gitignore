@@ -1,5 +1,6 @@
 # common scala config
 *~
+.metals/
 .DS_Store
 .artifactory
 .bsp
@@ -16,6 +17,15 @@ tags
 !/.idea/inspectionProfiles/Project_Default.xml
 target
 /site
+
+#from running integration tests locally
+actual.json
+console_output.txt
+expected.json
+run_mode_metadata.json
+
+#bloop files
+/.bloop
 
 # custom config
 cromwell-executions
@@ -38,7 +48,6 @@ cromwell-service-account.json
 cwl_conformance_test.inputs.json
 dockerhub_provider_config_v1.inc.conf
 dockerhub_provider_config_v2.inc.conf
-github_private_deploy_key
 papi_application.inc.conf
 papi_refresh_token.options.json
 papi_v2_gcsa.options.json
@@ -50,3 +59,10 @@ tesk_application.conf
 **/venv/
 exome_germline_single_sample_v1.3/
 **/*.pyc
+src/ci/resources/*.temp
+
+# GHA credentials
+gha-creds-*.json
+
+# jenv
+.java-version

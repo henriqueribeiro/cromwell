@@ -82,9 +82,9 @@ class DeserializationSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matc
             "commands" -> List[String]("echo", "hello").asJava
           ).asJava
         ).asJava,
-        "resources" -> Map(
+        "resources" -> Map[String, Object](
           "projectId" -> "project",
-          "virtualMachine" -> Map(
+          "virtualMachine" -> Map[String, Any](
             "machineType" -> "custom-1-1024",
             "preemptible" -> false
           ).asJava
@@ -117,10 +117,10 @@ class DeserializationSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matc
             "commands" -> List[String]("echo", "hello").asJava
           ).asJava
         ).asJava,
-        "resources" -> Map(
+        "resources" -> Map[String, Object](
           "projectId" -> "project",
           "virtualMachine" -> Map(
-            "machineType" -> "custom-1-1024",
+            "machineType" -> "custom-1-1024"
           ).asJava
         ).asJava
       ).asJava
@@ -153,15 +153,19 @@ class DeserializationSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matc
       )
     ).asJava
 
-    val metadataMapStarted = makeMetadata(Map[String, Object](
-      "@type" -> "WorkerAssignedEvent",
-      "zone" -> "event 1 Zone",
-      "instance" -> "event 1 Instance"
-    ))
+    val metadataMapStarted = makeMetadata(
+      Map[String, Object](
+        "@type" -> "WorkerAssignedEvent",
+        "zone" -> "event 1 Zone",
+        "instance" -> "event 1 Instance"
+      )
+    )
     val metadataMapNotStarted = makeMetadata(Map.empty)
-    val metadataMapNotStarted2 = makeMetadata(Map[String, Object](
-      "@type" -> "ContainerStartedEvent"
-    ))
+    val metadataMapNotStarted2 = makeMetadata(
+      Map[String, Object](
+        "@type" -> "ContainerStartedEvent"
+      )
+    )
 
     operation.setMetadata(metadataMapStarted)
     operation.hasStarted shouldBe true
@@ -174,8 +178,8 @@ class DeserializationSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matc
   it should "deserialize big decimals correctly" in {
     val valueMap = Map[String, Object](
       "integerValue" -> BigDecimal(5),
-      "doubleValue" -> BigDecimal.decimal(6D),
-      "floatValue" -> BigDecimal.decimal(7F),
+      "doubleValue" -> BigDecimal.decimal(6d),
+      "floatValue" -> BigDecimal.decimal(7f),
       "longValue" -> BigDecimal.decimal(8L)
     ).asJava
 
@@ -183,8 +187,8 @@ class DeserializationSpec extends AnyFlatSpec with CromwellTimeoutSpec with Matc
     deserialized.isSuccess shouldBe true
     val deserializedSuccess = deserialized.get
     deserializedSuccess.integerValue shouldBe 5
-    deserializedSuccess.doubleValue shouldBe 6D
-    deserializedSuccess.floatValue shouldBe 7F
+    deserializedSuccess.doubleValue shouldBe 6d
+    deserializedSuccess.floatValue shouldBe 7f
     deserializedSuccess.longValue shouldBe 8L
   }
 

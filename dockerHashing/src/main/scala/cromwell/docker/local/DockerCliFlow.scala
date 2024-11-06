@@ -28,20 +28,22 @@ class DockerCliFlow(implicit ec: ExecutionContext) extends DockerRegistry {
   override def run(dockerInfoContext: DockerInfoContext)(implicit client: Client[IO]) = {
     implicit val timer = IO.timer(ec)
 
-    DockerCliFlow.lookupHashOrTimeout(firstLookupTimeout)(dockerInfoContext)
-      .flatMap({
+    DockerCliFlow
+      .lookupHashOrTimeout(firstLookupTimeout)(dockerInfoContext)
+      .flatMap {
         // If the image isn't there, pull it and try again
         case (_: DockerInfoNotFound, _) =>
           DockerCliFlow.pull(dockerInfoContext)
           DockerCliFlow.lookupHashOrTimeout(firstLookupTimeout)(dockerInfoContext)
         case other => IO.pure(other)
-      })
+      }
   }
 
   override def config = DockerRegistryConfig.default
 }
 
 object DockerCliFlow {
+
   /**
     * Lookup the hash for the image referenced in the context.
     *
@@ -53,10 +55,11 @@ object DockerCliFlow {
     DockerInfoActor.logger.debug("Looking up hash of {}", dockerCliKey.fullName)
     val result = DockerCliClient.lookupHash(dockerCliKey) match {
       case Success(None) => DockerInfoNotFound(context.request)
-      case Success(Some(hash)) => DockerHashResult.fromString(hash) match {
-        case Success(r) => DockerInfoSuccessResponse(DockerInformation(r, None), context.request)
-        case Failure(t) => DockerInfoFailedResponse(t, context.request)
-      }
+      case Success(Some(hash)) =>
+        DockerHashResult.fromString(hash) match {
+          case Success(r) => DockerInfoSuccessResponse(DockerInformation(r, None), context.request)
+          case Failure(t) => DockerInfoFailedResponse(t, context.request)
+        }
       case Failure(throwable) => DockerInfoFailedResponse(throwable, context.request)
     }
     // give the compiler a hint on the debug() override we're trying to use.
@@ -72,22 +75,22 @@ object DockerCliFlow {
     * @param context   The image to lookup.
     * @return The docker hash response plus the context of our flow.
     */
-  private def lookupHashOrTimeout(timeout: FiniteDuration)
-                                 (context: DockerInfoContext)
-                                 (implicit cs: ContextShift[IO], timer: Timer[IO]): IO[(DockerInfoResponse, DockerInfoContext)] = {
-    IO(lookupHash(context)).timeout(timeout)
-      .handleErrorWith({
-        case _: TimeoutException => IO.pure {
-          val dockerCliKey = cliKeyFromImageId(context)
-          val exception = new TimeoutException(
-            s"""|Timeout while looking up hash of ${dockerCliKey.fullName}.
-                |Ensure that docker is running correctly.
-                |""".stripMargin)
-          DockerInfoFailedResponse(exception, context.request) -> context
-        }
+  private def lookupHashOrTimeout(timeout: FiniteDuration)(
+    context: DockerInfoContext
+  )(implicit cs: ContextShift[IO], timer: Timer[IO]): IO[(DockerInfoResponse, DockerInfoContext)] =
+    IO(lookupHash(context))
+      .timeout(timeout)
+      .handleErrorWith {
+        case _: TimeoutException =>
+          IO.pure {
+            val dockerCliKey = cliKeyFromImageId(context)
+            val exception = new TimeoutException(s"""|Timeout while looking up hash of ${dockerCliKey.fullName}.
+                                                     |Ensure that docker is running correctly.
+                                                     |""".stripMargin)
+            DockerInfoFailedResponse(exception, context.request) -> context
+          }
         case other => IO.pure(DockerInfoFailedResponse(other, context.request) -> context)
-      })
-  }
+      }
 
   /**
     * Pull the docker image referenced in context.
@@ -109,17 +112,25 @@ object DockerCliFlow {
   /** Utility for converting the flow image id to the format output by the docker cli. */
   private def cliKeyFromImageId(context: DockerInfoContext): DockerCliKey = {
     val imageId = context.dockerImageID
-    (imageId.host, imageId.repository) match {
-      case (None, None) =>
-        // For docker hub images (host == None), and don't include "library".
-        val repository = imageId.image
-        val tag = imageId.reference
-        DockerCliKey(repository, tag)
-      case _ =>
-        // For all other images, include the host and repository.
-        val repository = s"${imageId.hostAsString}${imageId.nameWithDefaultRepository}"
-        val tag = imageId.reference
-        DockerCliKey(repository, tag)
+    // private aws ECR does not have library, check for ECR in docker host.
+    if ( imageId.hostAsString.matches(raw"\d+\.dkr\.ecr\..+\.amazonaws\.com/") ) {
+       val repository = s"${imageId.hostAsString}${imageId.image}"
+       val tag = imageId.reference
+       DockerCliKey(repository, tag)
+    } else {
+      (imageId.host, imageId.repository) match {
+        case (None, None) =>
+          // For docker hub images (host == None), and don't include "library".
+          val repository = imageId.image
+          val tag = imageId.reference
+          DockerCliKey(repository, tag)
+        case _ =>
+          // For all other images, include the host and repository.
+          val repository = s"${imageId.hostAsString}${imageId.nameWithDefaultRepository}"
+          val tag = imageId.reference
+          DockerCliKey(repository, tag)
+      
+       }
     }
   }
 }

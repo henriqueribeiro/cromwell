@@ -15,18 +15,18 @@ object RetryableRequestSupport {
     * The default count is `5` and may be customized with `system.io.number-of-attempts`.
     */
   def isRetryable(failure: Throwable): Boolean = failure match {
-    case gcs: StorageException => gcs.isRetryable ||
+    case gcs: StorageException =>
+      gcs.isRetryable ||
       isRetryable(gcs.getCause) ||
       AdditionalRetryableHttpCodes.contains(gcs.getCode) ||
-      Option(gcs.getMessage).exists(msg =>
-        AdditionalRetryableErrorMessages.contains(msg.toLowerCase))
+      Option(gcs.getMessage).exists(msg => AdditionalRetryableErrorMessages.contains(msg.toLowerCase))
     case _: SSLException => true
     case _: BatchFailedException => true
     case _: ChecksumFailedException => true
     case _: SocketException => true
     case _: SocketTimeoutException => true
     case ioE: IOException if Option(ioE.getMessage).exists(_.contains("Error getting access token for service account")) => true
-    case ioE: IOException => isGcs500(ioE) || isGcs503(ioE) || isGcs504(ioE)
+    case ioE: IOException => isGcs500(ioE) || isGcs503(ioE) || isGcs504(ioE) || isAws504(ioE)
     case other =>
       // Infinitely retryable is a subset of retryable
       isInfinitelyRetryable(other)
@@ -68,24 +68,46 @@ object RetryableRequestSupport {
     isGcsRateLimitException(failure)
   }
 
-  def isGcs500(failure: Throwable): Boolean = {
+  def isGcs500(failure: Throwable): Boolean =
     Option(failure.getMessage).exists(msg =>
       msg.contains("Could not read from gs") &&
-      msg.contains("500 Internal Server Error")
+        msg.contains("500 Internal Server Error")
+    )
+
+  def isGcs503(failure: Throwable): Boolean =
+    Option(failure.getMessage).exists(msg =>
+      msg.contains("Could not read from gs") &&
+        msg.contains("503 Service Unavailable")
+    )
+
+  def isGcs504(failure: Throwable): Boolean =
+    Option(failure.getMessage).exists(msg =>
+      msg.contains("Could not read from gs") &&
+        msg.contains("504 Gateway Timeout")
+    )
+  
+  // AWS timeout error
+  def isAws504(failure: Throwable): Boolean = {
+    Option(failure.getMessage).exists(msg =>
+      ( 
+        // timeout in reading form s3. 
+        msg.contains("Could not read from s3") && 
+        msg.contains("Timeout waiting for connection") 
+      ) || (
+        // reading in cromwell wdl (read_lines() etc)
+        msg.contains("Failed to evaluate") &&
+        msg.contains("s3://") && 
+        msg.contains("Timed out after")
+      )
+    )
+  }
+  // General AWS IO error : all items unreadable except rc.txt files (might be missing)
+  //   => mainly for testing. will retry mis-specified s3 paths as well... 
+  def isAwsIO(failure:Throwable): Boolean = {
+    Option(failure.getMessage).exists(msg =>
+      msg.contains("Could not read from s3") && 
+      ! msg.contains("-rc.txt") 
     )
   }
 
-  def isGcs503(failure: Throwable): Boolean = {
-    Option(failure.getMessage).exists(msg =>
-      msg.contains("Could not read from gs") &&
-      msg.contains("503 Service Unavailable")
-    )
-  }
-
-  def isGcs504(failure: Throwable): Boolean = {
-    Option(failure.getMessage).exists(msg =>
-      msg.contains("Could not read from gs") &&
-      msg.contains("504 Gateway Timeout")
-    )
-  }
 }

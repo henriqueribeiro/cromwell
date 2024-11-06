@@ -29,7 +29,7 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-package cromwell.backend.impl.aws
+package cromwell.backend.impl.aws.io
 
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
@@ -39,6 +39,7 @@ import cromwell.core.WorkflowOptions
 import cromwell.core.path.PathBuilder
 import cromwell.filesystems.s3.S3PathBuilderFactory
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider
+import cromwell.backend.impl.aws.{AwsBatchConfiguration,AWSBatchStorageSystems}
 
 object AwsBatchWorkflowPaths {
   private val RootOptionKey = "aws_s3_root"
@@ -53,25 +54,35 @@ object AwsBatchWorkflowPaths {
  */
 case class AwsBatchWorkflowPaths(workflowDescriptor: BackendWorkflowDescriptor,
                                  provider: AwsCredentialsProvider,
-                                 configuration: AwsBatchConfiguration)(implicit actorSystem: ActorSystem) extends WorkflowPaths {
+                                 configuration: AwsBatchConfiguration
+)(implicit actorSystem: ActorSystem)
+    extends WorkflowPaths {
 
-  override lazy val executionRootString: String =  configuration.fileSystem match {
-    case AWSBatchStorageSystems.s3  => workflowDescriptor.workflowOptions.getOrElse(AwsBatchWorkflowPaths.RootOptionKey, configuration.root)
+  override lazy val executionRootString: String = configuration.fileSystem match {
+    case AWSBatchStorageSystems.s3 =>
+      workflowDescriptor.workflowOptions.getOrElse(AwsBatchWorkflowPaths.RootOptionKey, configuration.root)
     case _ => configuration.root
   }
   private val workflowOptions: WorkflowOptions = workflowDescriptor.workflowOptions
 
-  override def toJobPaths(workflowPaths: WorkflowPaths, jobKey: BackendJobDescriptorKey): AwsBatchJobPaths = {
+  override def toJobPaths(workflowPaths: WorkflowPaths, jobKey: BackendJobDescriptorKey): AwsBatchJobPaths =
     new AwsBatchJobPaths(workflowPaths.asInstanceOf[AwsBatchWorkflowPaths], jobKey)
-  }
 
-  override protected def withDescriptor(workflowDescriptor: BackendWorkflowDescriptor): WorkflowPaths = this.copy(workflowDescriptor = workflowDescriptor)
+  override protected def withDescriptor(workflowDescriptor: BackendWorkflowDescriptor): WorkflowPaths =
+    this.copy(workflowDescriptor = workflowDescriptor)
 
   override def config: Config = configuration.configurationDescriptor.backendConfig
-  override def pathBuilders: List[PathBuilder] = {
+  override def pathBuilders: List[PathBuilder] =
     if (configuration.fileSystem == "s3") {
-      List(configuration.pathBuilderFactory.asInstanceOf[S3PathBuilderFactory].fromProvider(workflowOptions, provider))
+      // if efs is activated : add the default (local) pathbuilders.
+      if (configuration.batchAttributes.efsMntPoint.isDefined) {
+        List(configuration.pathBuilderFactory.asInstanceOf[S3PathBuilderFactory].fromProvider(workflowOptions, provider) ) ++ WorkflowPaths.DefaultPathBuilders
+      }
+      else {
+        List(configuration.pathBuilderFactory.asInstanceOf[S3PathBuilderFactory].fromProvider(workflowOptions, provider) )
+      }
     } else {
-      WorkflowPaths.DefaultPathBuilders}
-  }
+      WorkflowPaths.DefaultPathBuilders
+    }
 }
+

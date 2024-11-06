@@ -68,8 +68,12 @@ cmp <(jq -cS . actual.json) <(jq -cS . expected.json)
 popd > /dev/null
 
 # Test 3: program should exit with error in case if validation of command line arguments failed
+# Redirect stderr for the expected cromwell crash so we don't agitate CI.
+exec 3>&2
+exec 2> /dev/null
 java -jar "${CROMWELL_BUILD_CROMWELL_JAR}" run nonexistent.wdl &
 pid=$!
+exec 2>&3
 sleep 10
 if kill -0 $pid > /dev/null 2>&1; then
   echo "ERROR: Process still exists"
@@ -92,26 +96,3 @@ if [ $retVal -eq 0 ]; then
 else
     grep "Error: Unknown argument" console_output.txt
 fi
-
-# Test 5: application should run cwl with inputs
-STANDARD_TEST_CASES="$PWD/centaur/src/main/resources/standardTestCases/cwl_run"
-pushd "$STANDARD_TEST_CASES" > /dev/null
-
-java -jar ${CROMWELL_BUILD_CROMWELL_JAR} run ./1st-tool.cwl --inputs ./echo-job.yml --metadata-output ./run_mode_metadata.json | tee console_output.txt
-
-cat > expected.json <<FIN
-{
-  "actualWorkflowLanguage": "CWL",
-  "actualWorkflowLanguageVersion": "v1.0",
-  "status": "Succeeded"
-}
-FIN
-
-jq '{
-  actualWorkflowLanguage,
-  actualWorkflowLanguageVersion,
-  status
-}' run_mode_metadata.json > actual.json
-
-cmp <(jq -cS . actual.json) <(jq -cS . expected.json)
-popd > /dev/null

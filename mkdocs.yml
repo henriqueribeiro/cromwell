@@ -79,7 +79,6 @@ nav:
     - Integration tests: developers/Centaur.md
     - Security: developers/Security.md
     - Contribute to docs: developers/Contribute.md
-    - CWL Parsing: developers/CwlParsing.md
     - Bitesize Design Docs:
         - Workflow Parsing & Graph Construction:
             - What is WOM?: developers/bitesize/workflowParsing/whatIsWom.md
@@ -87,7 +86,6 @@ nav:
                 - Overview: developers/bitesize/workflowParsing/wdlParsingOverview.md
                 - From WDL to WDLOM: developers/bitesize/workflowParsing/wdlToWdlom.md
                 - Adding new WDL Engine Functions: developers/bitesize/workflowParsing/engineFunctionAddition.md
-            - From CWL Source to WOM: developers/bitesize/workflowParsing/cwlParsingOverview.md
         - Cromwell Actor System:
             - High level view: developers/bitesize/majorActorSystem/5000FtActorSystem.md
             - Workflow Execution:
@@ -104,8 +102,6 @@ nav:
         - Horizontal Cromwell ("Horicromtal"): developers/bitesize/horicromtal.md
         - General Topics:
             - Simpletons: developers/bitesize/general/simpletons.md
-        - Continuous Integration (CI) / Continuous Delivery (CD): developers/bitesize/ci/CICD.md
-        - Travis Centaur: developers/bitesize/ci/travis_centaur.md
 
 theme: readthedocs
 
@@ -114,5 +110,5 @@ extra_css:
 extra_javascript:
     - js/extra.js
 
-copyright: Copyright &copy; 2019 <a href="https://broadinstitute.org">Broad Institute</a>
-# google_analytics: ['identifierID', 'URL.org']
+hooks:
+    - docs/set_copyright.py

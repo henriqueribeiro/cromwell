@@ -1,12 +1,11 @@
 package cromwell.database.sql.tables
 
-case class SubWorkflowStoreEntry
-(
-  rootWorkflowId: Option[Int],
+case class SubWorkflowStoreEntry(
+  rootWorkflowId: Option[Long],
   parentWorkflowExecutionUuid: String,
   callFullyQualifiedName: String,
   callIndex: Int,
   callAttempt: Int,
   subWorkflowExecutionUuid: String,
-  subWorkflowStoreEntryId: Option[Int] = None
+  subWorkflowStoreEntryId: Option[Long] = None
 )

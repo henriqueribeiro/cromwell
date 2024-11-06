@@ -34,7 +34,7 @@ package cromwell.backend.impl.aws
 import scala.collection.mutable.ListBuffer
 import cromwell.backend.BackendJobDescriptor
 import cromwell.backend.io.JobPaths
-import software.amazon.awssdk.services.batch.model.{ContainerProperties, Host, KeyValuePair, MountPoint, ResourceRequirement, ResourceType, Volume}
+import software.amazon.awssdk.services.batch.model.{ContainerProperties, EvaluateOnExit, Host, KeyValuePair, LinuxParameters, LogConfiguration, MountPoint, ResourceRequirement, ResourceType, RetryAction, RetryStrategy, Ulimit, Volume}
 import cromwell.backend.impl.aws.io.AwsBatchVolume
 
 import scala.jdk.CollectionConverters._
@@ -42,7 +42,7 @@ import java.security.MessageDigest
 import org.apache.commons.lang3.builder.{ToStringBuilder, ToStringStyle}
 import org.slf4j.{Logger, LoggerFactory}
 import wdl4s.parser.MemoryUnit
-
+import wom.format.MemorySize
 
 /**
   * Responsible for the creation of the job definition.
@@ -60,130 +60,207 @@ import wdl4s.parser.MemoryUnit
   */
 sealed trait AwsBatchJobDefinition {
   def containerProperties: ContainerProperties
+  def retryStrategy: RetryStrategy
   def name: String
 
-  override def toString: String = {
+  override def toString: String =
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
       .append("name", name)
       .append("containerProperties", containerProperties)
+      .append("retryStrategy", retryStrategy)
       .build
-  }
 }
 
 trait AwsBatchJobDefinitionBuilder {
   val Log: Logger = LoggerFactory.getLogger(StandardAwsBatchJobDefinitionBuilder.getClass)
 
-
   /** Gets a builder, seeded with appropriate portions of the container properties
    *
-   *  @param dockerImage docker image with which to run
-   *  @return ContainerProperties builder ready for modification
+   *  @param context AwsBatchJobDefinitionContext with all the runtime attributes
+   *  @return ContainerProperties builder ready for modification and name
    *
    */
-  def builder(dockerImage: String): ContainerProperties.Builder =
-    ContainerProperties.builder().image(dockerImage)
+  def containerPropertiesBuilder(context: AwsBatchJobDefinitionContext): (ContainerProperties.Builder, String) = {
 
+    def buildVolumes(disks: Seq[AwsBatchVolume], fsx: Option[List[String]]): List[Volume] = {
 
-  def buildResources(builder: ContainerProperties.Builder,
-                     context: AwsBatchJobDefinitionContext): (ContainerProperties.Builder, String) = {
-    // The initial buffer should only contain one item - the hostpath of the
-    // local disk mount point, which will be needed by the docker container
-    // that copies data around
-
-    val environment = List.empty[KeyValuePair]
-
-
-    def buildVolumes(disks: Seq[AwsBatchVolume]): List[Volume] = {
+      val fsx_volumes = fsx.isDefined match {
+        case true => fsx.get.map(mnt => Volume.builder().name(mnt).host(Host.builder().sourcePath(s"/$mnt").build()).build())
+        case false => List()
+      }
 
       //all the configured disks plus the fetch and run volume and the aws-cli volume
       disks.map(d => d.toVolume()).toList ++ List(
-        Volume.builder()
-        .name("fetchAndRunScript")
-        .host(Host.builder().sourcePath("/usr/local/bin/fetch_and_run.sh").build())
-        .build(),
-        //the aws-cli location on the EC2
-        Volume.builder()
+        Volume
+          .builder()
+          .name("fetchAndRunScript")
+          .host(Host.builder().sourcePath("/usr/local/bin/fetch_and_run.sh").build())
+          .build(),
+        // the aws-cli location on the EC2
+        Volume
+          .builder()
           .name("awsCliHome")
           .host(Host.builder().sourcePath("/usr/local/aws-cli").build())
+          .build(),
+        // the location of the instance-id on the host (set by cloud-init)
+        // https://cloudinit.readthedocs.io/en/23.2.2/reference/faq.html#data
+        Volume.builder()
+          .name("instanceId")
+          .host(Host.builder().sourcePath("/var/lib/cloud/data/instance-id").build())
           .build()
-      )
+      ) ++ fsx_volumes
     }
 
-    def buildMountPoints(disks: Seq[AwsBatchVolume]): List[MountPoint] = {
+    def buildMountPoints(disks: Seq[AwsBatchVolume], fsx: Option[List[String]]): List[MountPoint] = {
+
+      val fsx_disks = fsx.isDefined match {
+        case true => fsx.get.map(mnt => MountPoint.builder().readOnly(false).sourceVolume(mnt).containerPath(s"/$mnt").build())
+        case false => List()
+      }
 
       //all the configured disks plus the fetch and run mount point and the AWS cli mount point
       disks.map(_.toMountPoint).toList ++ List(
-        MountPoint.builder()
+        MountPoint
+          .builder()
           .readOnly(true)
           .sourceVolume("fetchAndRunScript")
           .containerPath("/var/scratch/fetch_and_run.sh")
           .build(),
-
-        MountPoint.builder()
+        MountPoint
+          .builder()
           .readOnly(true)
           .sourceVolume("awsCliHome")
-          //where the aws-cli will be on the container
+          // where the aws-cli will be on the container
           .containerPath("/usr/local/aws-cli")
+          .build(),
+        // the location of the instance-id on the container, used to tag the instance
+        MountPoint.builder()
+          .readOnly(true)
+          .sourceVolume("instanceId")
+          .containerPath("/var/lib/cloud/data/instance-id")
           .build()
-      )
+
+      ) ++ fsx_disks
     }
 
-    def buildName(imageName: String, packedCommand: String, volumes: List[Volume], mountPoints: List[MountPoint], env: Seq[KeyValuePair]): String = {
-      val str = s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}"
+    def buildUlimits(ulimits: Seq[Map[String, String]]): List[Ulimit] = {
 
-      val sha1 = MessageDigest.getInstance("SHA-1")
-            .digest( str.getBytes("UTF-8") )
-            .map("%02x".format(_)).mkString
-
-      val prefix = s"cromwell_$imageName".slice(0,88) // will be joined to a 40 character SHA1 for total length of 128
-
-      sanitize(prefix + sha1)
+      ulimits.filter(_.nonEmpty).map(u =>
+        Ulimit.builder()
+          .name(u("name"))
+          .softLimit(u("softLimit").toInt)
+          .hardLimit(u("hardLimit").toInt)
+          .build()
+      ).toList
     }
 
+    def buildName(
+      imageName: String,
+      packedCommand: String,
+      volumes: List[Volume],
+      mountPoints: List[MountPoint],
+      env: Seq[KeyValuePair],
+      ulimits: List[Ulimit],
+      efsDelocalize: Boolean,
+      efsMakeMD5: Boolean,
+      tagResources: Boolean,
+      logGroupName: String,
+      sharedMemorySize: MemorySize): String = {
+        s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}:${tagResources.toString}:$logGroupName:${sharedMemorySize.to(MemoryUnit.MB).amount.toInt}"
+      }
 
+    val environment = List.empty[KeyValuePair]
     val cmdName = context.runtimeAttributes.fileSystem match {
-       case AWSBatchStorageSystems.s3 => "/var/scratch/fetch_and_run.sh"
-       case _ =>  context.commandText
+      case AWSBatchStorageSystems.s3 => "/var/scratch/fetch_and_run.sh"
+      case _ =>  context.commandText
     }
     val packedCommand = packCommand("/bin/bash", "-c", cmdName)
-    val volumes =  buildVolumes( context.runtimeAttributes.disks )
-    val mountPoints = buildMountPoints( context.runtimeAttributes.disks)
-    val jobDefinitionName = buildName(
+    val volumes =  buildVolumes( context.runtimeAttributes.disks, context.fsxMntPoint)
+    val mountPoints = buildMountPoints( context.runtimeAttributes.disks, context.fsxMntPoint)
+    val logGroupName = context.runtimeAttributes.logGroupName
+    val logConfiguration = LogConfiguration.builder()
+      .logDriver("awslogs")
+      .options(
+        Map(
+          "awslogs-group" -> logGroupName
+        ).asJava
+      )
+      .build()
+    val ulimits = buildUlimits( context.runtimeAttributes.ulimits)
+    val efsDelocalize = context.runtimeAttributes.efsDelocalize
+    val efsMakeMD5 = context.runtimeAttributes.efsMakeMD5
+    val tagResources = context.runtimeAttributes.tagResources
+
+    val containerPropsName = buildName(
       context.runtimeAttributes.dockerImage,
       packedCommand.mkString(","),
       volumes,
       mountPoints,
-      environment
+      environment,
+      ulimits,
+      efsDelocalize,
+      efsMakeMD5,
+      tagResources,
+      logGroupName,
+      context.runtimeAttributes.sharedMemorySize
+    )
+    // To reuse job definition for gpu and gpu-runs, we will create a job definition that does not gpu requirements
+    // since aws batch does not allow you to set gpu as 0 when you dont need it. you will always need cpu and memory
+    (ContainerProperties.builder()
+      .image(context.runtimeAttributes.dockerImage)
+      .command(packedCommand.asJava)
+      .resourceRequirements(
+        ResourceRequirement.builder().`type`(ResourceType.VCPU).value(context.runtimeAttributes.cpu.##.toString).build(),
+        ResourceRequirement.builder().`type`(ResourceType.MEMORY).value(context.runtimeAttributes.memory.to(MemoryUnit.MB).amount.toInt.toString).build()
+      )
+      .logConfiguration(logConfiguration)
+      .volumes(volumes.asJava)
+      .mountPoints(mountPoints.asJava)
+      .environment(environment.asJava)
+      .ulimits(ulimits.asJava)
+      .linuxParameters(
+      LinuxParameters.builder().sharedMemorySize(context.runtimeAttributes.sharedMemorySize.to(MemoryUnit.MB).amount.toInt).build() // Convert MemorySize to MB
+    ),
+     containerPropsName)
+  }
+
+  def retryStrategyBuilder(context: AwsBatchJobDefinitionContext): (RetryStrategy.Builder, String) = {
+    // We can add here the 'evaluateOnExit' statement
+    var builder = RetryStrategy.builder()
+      .attempts(context.runtimeAttributes.awsBatchRetryAttempts)
+
+    var evaluations: Seq[EvaluateOnExit] = Seq()
+    context.runtimeAttributes.awsBatchEvaluateOnExit.foreach(
+      (evaluate) => {
+        val evaluateBuilder = evaluate.foldLeft(EvaluateOnExit.builder()) {
+          case (acc, (k, v)) => (k.toLowerCase, v.toLowerCase) match {
+            case ("action", "retry") => acc.action(RetryAction.RETRY)
+            case ("action", "exit") => acc.action(RetryAction.EXIT)
+            case ("onexitcode", _) => acc.onExitCode(v)
+            case ("onreason", _) => acc.onReason(v)
+            case ("onstatusreason", _) => acc.onStatusReason(v)
+            case _ => acc
+          }
+        }
+        evaluations = evaluations :+ evaluateBuilder.build()
+      }
     )
 
-    (builder
-       .command(packedCommand.asJava)
-      .resourceRequirements(
-        ResourceRequirement.builder()
-          .`type`(ResourceType.MEMORY)
-          .value(context.runtimeAttributes.memory.to(MemoryUnit.MB).amount.toInt.toString)
-          .build(),
-        ResourceRequirement.builder()
-          .`type`(ResourceType.VCPU)
-          .value(context.runtimeAttributes.cpu.value.toString)
-          .build(),
-      )
-        .volumes( volumes.asJava)
-        .mountPoints( mountPoints.asJava)
-        .environment(environment.asJava),
+    builder = builder.evaluateOnExit(evaluations.asJava)
 
-      jobDefinitionName)
+    (builder,
+     s"${context.runtimeAttributes.awsBatchRetryAttempts.toString}${context.runtimeAttributes.awsBatchEvaluateOnExit.toString}")
   }
+
 
   private def packCommand(shell: String, options: String, mainCommand: String): Seq[String] = {
     val rc = new ListBuffer[String]()
-    val lim = 1024
+    val lim = 20480
     val packedCommand = mainCommand.length() match {
       case len if len <= lim => mainCommand
-      case len if len > lim => {
+      case len if len > lim =>
         rc += "gzipdata" // This is hard coded in our agent and must be the first item
         gzip(mainCommand)
-      }
     }
     rc += shell
     rc += options
@@ -196,15 +273,28 @@ trait AwsBatchJobDefinitionBuilder {
 
 object StandardAwsBatchJobDefinitionBuilder extends AwsBatchJobDefinitionBuilder {
   def build(context: AwsBatchJobDefinitionContext): AwsBatchJobDefinition = {
-    //instantiate a builder with the name of the docker image
-    val builderInst = builder(context.runtimeAttributes.dockerImage)
-    val (b, name) = buildResources(builderInst, context)
+    val (containerPropsInst, containerPropsName) = containerPropertiesBuilder(context)
+    val (retryStrategyInst, retryStrategyName) = retryStrategyBuilder(context)
 
-    new StandardAwsBatchJobDefinitionBuilder(b.build, name)
+    val name = buildName(context.runtimeAttributes.dockerImage, containerPropsName, retryStrategyName)
+
+    new StandardAwsBatchJobDefinitionBuilder(containerPropsInst.build, retryStrategyInst.build, name)
+  }
+
+  def buildName(imageName: String, containerPropsName: String, retryStrategyName: String): String = {
+    val str = s"$imageName:$containerPropsName:$retryStrategyName"
+
+    val sha1 = MessageDigest.getInstance("SHA-1")
+          .digest( str.getBytes("UTF-8") )
+          .map("%02x".format(_)).mkString
+
+    val prefix = s"cromwell_${imageName}_".slice(0,88) // will be joined to a 40 character SHA1 for total length of 128
+
+    sanitize(prefix + sha1)
   }
 }
 
-case class StandardAwsBatchJobDefinitionBuilder private(containerProperties: ContainerProperties, name: String) extends AwsBatchJobDefinition
+case class StandardAwsBatchJobDefinitionBuilder private(containerProperties: ContainerProperties, retryStrategy: RetryStrategy, name: String) extends AwsBatchJobDefinition
 
 object AwsBatchJobDefinitionContext
 
@@ -217,19 +307,29 @@ case class AwsBatchJobDefinitionContext(
             jobDescriptor: BackendJobDescriptor,
             jobPaths: JobPaths,
             inputs: Set[AwsBatchInput],
-            outputs: Set[AwsBatchFileOutput]){
+            outputs: Set[AwsBatchFileOutput],
+            fsxMntPoint: Option[List[String]],
+            efsMntPoint: Option[String],
+            efsMakeMD5: Option[Boolean],
+            efsDelocalize: Option[Boolean],
+            tagResources: Option[Boolean]
+            ) {
 
-  override def toString: String = {
+  override def toString: String =
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
       .append("runtimeAttributes", runtimeAttributes)
       .append("commandText", commandText)
       .append("dockerRcPath", dockerRcPath)
-      .append("dockerStderrPath",dockerStderrPath)
+      .append("dockerStderrPath", dockerStderrPath)
       .append("dockerStdoutPath", dockerStdoutPath)
       .append("jobDescriptor", jobDescriptor)
       .append("jobPaths", jobPaths)
       .append("inputs", inputs)
       .append("outputs", outputs)
+      .append("fsxMntPoint", fsxMntPoint)
+      .append("efsMntPoint", efsMntPoint)
+      .append("efsMakeMD5", efsMakeMD5)
+      .append("efsDelocalize", efsDelocalize)
+      .append("tagResources", tagResources)
       .build
-  }
 }

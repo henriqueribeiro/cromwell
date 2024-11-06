@@ -1,7 +1,7 @@
 package cromwell.filesystems.drs
 
 import cloud.nio.impl.drs.DrsCloudNioFileProvider.DrsReadInterpreter
-import cloud.nio.impl.drs.{DrsCloudNioFileSystemProvider, GoogleDrsCredentials}
+import cloud.nio.impl.drs.{DrsCloudNioFileSystemProvider, GoogleOauthDrsCredentials}
 import com.google.cloud.NoCredentials
 import com.typesafe.config.{Config, ConfigFactory}
 import cromwell.core.TestKitSuite
@@ -51,9 +51,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a path with non-ascii",
       path = s"drs://$bucket/hello/world/with non ascii £€",
@@ -66,9 +65,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a gs uri path with encoded characters",
       path = s"drs://$bucket/hello/world/encoded%20spaces",
@@ -81,9 +79,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a file at the top of the bucket",
       path = s"drs://$bucket/hello",
@@ -96,9 +93,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a path ending in /",
       path = s"drs://$bucket/hello/world/",
@@ -111,7 +107,7 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
 
     // Special paths
@@ -128,9 +124,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a bucket with a path ..",
       path = s"drs://$bucket/..",
@@ -143,9 +138,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a bucket including . in the path",
       path = s"drs://$bucket/hello/./world",
@@ -158,9 +152,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a bucket including .. in the path",
       path = s"drs://$bucket/hello/../world",
@@ -173,7 +166,7 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
 
     // Normalized
@@ -190,9 +183,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a bucket with a normalized path ..",
       path = s"drs://$bucket/..",
@@ -205,9 +197,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a bucket including . in the normalized path",
       path = s"drs://$bucket/hello/./world",
@@ -220,9 +211,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a bucket including .. in the normalized path",
       path = s"drs://$bucket/hello/../world",
@@ -235,9 +225,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a bucket with an underscore",
       path = s"drs://hello_underscore/world",
@@ -250,9 +239,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a bucket named .",
       path = s"drs://./hello/world",
@@ -265,9 +253,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "a non ascii bucket name",
       path = s"drs://nonasciibucket£€/hello/world",
@@ -280,9 +267,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "an non-absolute path without a host",
       path = s"drs://blah/",
@@ -295,9 +281,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
-
     GoodPath(
       description = "an absolute path without a host",
       path = s"drs://blah",
@@ -310,10 +295,10 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
 
-    // No spec says this is illegal... so pass it to Martha's various GCFs JIC
+    // No spec says this is illegal... so pass it to the DRS Resolver's various GCFs JIC
     GoodPath(
       description = "a bucketless path",
       path = s"drs://",
@@ -326,7 +311,7 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
 
     // Sample via: https://docs.google.com/document/d/1Wf4enSGOEXD5_AE-uzLoYqjIp5MnePbZ6kYTVFp1WoM/edit
@@ -340,12 +325,11 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
         "drs.data.humancellatlas.org/8aca942c-17f7-4e34-b8fd-3c12e50f9291?version=2019-07-04T151444.185805Z",
       parent = null,
       getParent = null,
-      root =
-        "drs://drs.data.humancellatlas.org/8aca942c-17f7-4e34-b8fd-3c12e50f9291?version=2019-07-04T151444.185805Z",
+      root = "drs://drs.data.humancellatlas.org/8aca942c-17f7-4e34-b8fd-3c12e50f9291?version=2019-07-04T151444.185805Z",
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
+      isAbsolute = false
     ),
 
     // Sample via: https://docs.google.com/document/d/1Wf4enSGOEXD5_AE-uzLoYqjIp5MnePbZ6kYTVFp1WoM/edit
@@ -361,8 +345,8 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
       name = "",
       getFileName = null,
       getNameCount = 1,
-      isAbsolute = false,
-    ),
+      isAbsolute = false
+    )
   )
 
   private def badPaths = Seq(
@@ -371,15 +355,15 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
     BadPath("a https path", "https://hello/world", "https://hello/world does not have a drs scheme."),
     BadPath("a file uri path", "file:///hello/world", "file:///hello/world does not have a drs scheme."),
     BadPath("a relative file path", "hello/world", "hello/world does not have a drs scheme."),
-    BadPath("an absolute file path", "/hello/world", "/hello/world does not have a drs scheme."),
+    BadPath("an absolute file path", "/hello/world", "/hello/world does not have a drs scheme.")
   )
 
   private val drsReadInterpreter: DrsReadInterpreter = (_, _) =>
     throw new UnsupportedOperationException("Currently DrsPathBuilderSpec doesn't need to use drs read interpreter.")
 
-  private val marthaConfig: Config = ConfigFactory.parseString(
-    """martha {
-      |   url = "http://martha-url"
+  private val drsResolverConfig: Config = ConfigFactory.parseString(
+    """resolver {
+      |   url = "http://drshub-url"
       |}
       |""".stripMargin
   )
@@ -387,7 +371,10 @@ class DrsPathBuilderSpec extends TestKitSuite with AnyFlatSpecLike with Matchers
   private lazy val fakeCredentials = NoCredentials.getInstance
 
   private lazy val drsPathBuilder = DrsPathBuilder(
-    new DrsCloudNioFileSystemProvider(marthaConfig, GoogleDrsCredentials(fakeCredentials, 1.minutes), drsReadInterpreter),
-    None,
+    new DrsCloudNioFileSystemProvider(drsResolverConfig,
+                                      GoogleOauthDrsCredentials(fakeCredentials, 1.minutes),
+                                      drsReadInterpreter
+    ),
+    None
   )
 }

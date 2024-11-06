@@ -33,7 +33,7 @@ package cromwell.backend.impl.aws
 
 import cromwell.filesystems.s3.S3PathBuilderFactory
 import cromwell.backend.BackendConfigurationDescriptor
-import cromwell.core.{BackendDockerConfiguration}
+import cromwell.core.BackendDockerConfiguration
 import cromwell.core.path.PathBuilderFactory
 import cromwell.cloudsupport.aws.AwsConfiguration
 
@@ -45,23 +45,30 @@ class AwsBatchConfiguration(val configurationDescriptor: BackendConfigurationDes
   val runtimeConfig = configurationDescriptor.backendRuntimeAttributesConfig
   val batchAttributes = AwsBatchAttributes.fromConfigs(awsConfig, configurationDescriptor.backendConfig)
   val awsAuth = batchAttributes.auth
-  val dockerCredentials = BackendDockerConfiguration.build(configurationDescriptor.backendConfig).dockerCredentials
   val fileSystem =
     configurationDescriptor.backendConfig.hasPath("filesystems.s3") match {
-      case true =>  "s3"
+      case true => "s3"
       case false => "local"
-  }
+    }
   val pathBuilderFactory = configurationDescriptor.backendConfig.hasPath("filesystems.s3") match {
     case true => S3PathBuilderFactory(configurationDescriptor.globalConfig, configurationDescriptor.backendConfig)
     case false =>
-    PathBuilderFactory
+      PathBuilderFactory
   }
+  val dockerCredentials = BackendDockerConfiguration.build(configurationDescriptor.backendConfig).dockerCredentials
+  val dockerToken: Option[String] = dockerCredentials map { _.token }
+  val fsxMntPoint = batchAttributes.fsxMntPoint
+  val efsMntPoint = batchAttributes.efsMntPoint
+  val efsMakeMD5 = batchAttributes.efsMakeMD5
+  val efsDelocalize = batchAttributes.efsDelocalize
+  val tagResources = batchAttributes.tagResources
+  val globLinkCommand = batchAttributes.globLinkCommand
+  val checkSiblingMd5 = batchAttributes.checkSiblingMd5
 }
 
 object AWSBatchStorageSystems {
-  val s3:String = "s3"
-  val efs:String = "efs"
-  val ebs:String = "ebs"
-  val local:String = "local"
+  val s3: String = "s3"
+  val efs: String = "efs"
+  val ebs: String = "ebs"
+  val local: String = "local"
 }
-

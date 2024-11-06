@@ -11,7 +11,6 @@ import cromwell.services.instrumentation.CromwellInstrumentationActor
 import cromwell.webservice.SwaggerService
 import cromwell.webservice.routes.CromwellApiService
 import cromwell.webservice.routes.wes.WesRouteSupport
-import cromwell.webservice.routes.wes.WesRunRoutes
 
 import scala.concurrent.Future
 import scala.util.{Failure, Success}
@@ -21,27 +20,29 @@ object CromwellServer {
   def run(gracefulShutdown: Boolean, abortJobsOnTerminate: Boolean)(cromwellSystem: CromwellSystem): Future[Any] = {
     implicit val actorSystem = cromwellSystem.actorSystem
     implicit val materializer = cromwellSystem.materializer
-    actorSystem.actorOf(CromwellServerActor.props(cromwellSystem, gracefulShutdown, abortJobsOnTerminate), "cromwell-service")
+    actorSystem.actorOf(CromwellServerActor.props(cromwellSystem, gracefulShutdown, abortJobsOnTerminate),
+                        "cromwell-service"
+    )
     actorSystem.whenTerminated
   }
 }
 
-class CromwellServerActor(cromwellSystem: CromwellSystem, gracefulShutdown: Boolean, abortJobsOnTerminate: Boolean)(override implicit val materializer: ActorMaterializer)
-  extends CromwellRootActor(
-    terminator = cromwellSystem,
-    gracefulShutdown = gracefulShutdown,
-    abortJobsOnTerminate = abortJobsOnTerminate,
-    serverMode = true,
-    config = cromwellSystem.config
-  )
+class CromwellServerActor(cromwellSystem: CromwellSystem, gracefulShutdown: Boolean, abortJobsOnTerminate: Boolean)(
+  implicit override val materializer: ActorMaterializer
+) extends CromwellRootActor(
+      terminator = cromwellSystem,
+      gracefulShutdown = gracefulShutdown,
+      abortJobsOnTerminate = abortJobsOnTerminate,
+      serverMode = true,
+      config = cromwellSystem.config
+    )
     with CromwellApiService
     with CromwellInstrumentationActor
     with WesRouteSupport
-    with WesRunRoutes
     with SwaggerService
     with ActorLogging {
   implicit val actorSystem = context.system
-  override implicit val ec = context.dispatcher
+  implicit override val ec = context.dispatcher
   override def actorRefFactory: ActorContext = context
 
   val webserviceConf = cromwellSystem.config.getConfig("webservice")
@@ -53,7 +54,7 @@ class CromwellServerActor(cromwellSystem: CromwellSystem, gracefulShutdown: Bool
     * cromwell.yaml is broken unless the swagger index.html is patched. Copy/paste the code from rawls or cromiam if
     * actual cromwell+swagger+oauth+/api support is needed.
     */
-  val apiRoutes: Route = pathPrefix("api")(concat(workflowRoutes, womtoolRoutes, wesRoutes, runRoutes))
+  val apiRoutes: Route = pathPrefix("api")(concat(workflowRoutes, womtoolRoutes, wesRoutes))
   val nonApiRoutes: Route = concat(engineRoutes, swaggerUiResourceRoute)
   val allRoutes: Route = concat(apiRoutes, nonApiRoutes)
 
@@ -73,7 +74,7 @@ class CromwellServerActor(cromwellSystem: CromwellSystem, gracefulShutdown: Bool
         If/when CromwellServer behaves like a better async citizen, we may be less paranoid about our async log messages
         not appearing due to the actor system shutdown. For now, synchronously print to the stderr so that the user has
         some idea of why the server failed to start up.
-      */
+       */
       Console.err.println(s"Binding failed interface $interface port $port")
       e.printStackTrace(Console.err)
       cromwellSystem.shutdownActorSystem()
@@ -87,7 +88,9 @@ class CromwellServerActor(cromwellSystem: CromwellSystem, gracefulShutdown: Bool
 }
 
 object CromwellServerActor {
-  def props(cromwellSystem: CromwellSystem, gracefulShutdown: Boolean, abortJobsOnTerminate: Boolean)(implicit materializer: ActorMaterializer): Props = {
-    Props(new CromwellServerActor(cromwellSystem, gracefulShutdown, abortJobsOnTerminate)).withDispatcher(EngineDispatcher)
-  }
+  def props(cromwellSystem: CromwellSystem, gracefulShutdown: Boolean, abortJobsOnTerminate: Boolean)(implicit
+    materializer: ActorMaterializer
+  ): Props =
+    Props(new CromwellServerActor(cromwellSystem, gracefulShutdown, abortJobsOnTerminate))
+      .withDispatcher(EngineDispatcher)
 }

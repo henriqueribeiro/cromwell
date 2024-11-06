@@ -10,8 +10,6 @@ import common.Checked
 import common.transforms.CheckedAtoB
 import common.validation.Validation._
 import common.collections.EnhancedCollections._
-import cwl.CwlDecoder
-import cwl.preprocessor.CwlPreProcessor
 import spray.json.{JsArray, JsBoolean, JsNull, JsNumber, JsObject, JsString, JsValue}
 import wdl.draft2.model.{WdlNamespace, WdlNamespaceWithWorkflow}
 import wdl.transforms.base.wdlom2wom.FileElementToWomBundleInputs
@@ -21,7 +19,6 @@ import wdl.draft3.transforms.parsing.fileToAst
 import wdl.transforms.draft2.wdlom2wom.WdlDraft2WomBundleMakers._
 import wom.callable.WorkflowDefinition
 import wom.executable.WomBundle
-import wom.expression.NoIoFunctionSet
 import wom.graph._
 import wom.transforms.WomBundleMaker.ops._
 import wom.types._
@@ -32,13 +29,13 @@ import scala.jdk.CollectionConverters._
 class WomGraph(graphName: String, graph: Graph) {
 
   def indent(s: String) = s.linesIterator.map(x => s"  $x").mkString(System.lineSeparator)
-  def combine(ss: Iterable[String]) = ss.mkString(start="", sep=System.lineSeparator, end=System.lineSeparator)
+  def combine(ss: Iterable[String]) = ss.mkString(start = "", sep = System.lineSeparator, end = System.lineSeparator)
   def indentAndCombine(ss: Iterable[String]) = combine(ss.map(indent))
   implicit val monoid = cats.derived.MkMonoid[NodesAndLinks]
 
   val digraphDot: String = {
 
-    val workflowDigraph = WorkflowDigraph (dotSafe(graphName), listAllGraphNodes(graph))
+    val workflowDigraph = WorkflowDigraph(dotSafe(graphName), listAllGraphNodes(graph))
 
     s"""|digraph ${workflowDigraph.workflowName}
         |{
@@ -52,12 +49,12 @@ class WomGraph(graphName: String, graph: Graph) {
 
   private lazy val clusterCount: AtomicInteger = new AtomicInteger(0)
 
-  private[graph] def listAllGraphNodes(graph: Graph): NodesAndLinks = {
+  private[graph] def listAllGraphNodes(graph: Graph): NodesAndLinks =
     graph.nodes.toList foldMap nodesAndLinks
-  }
 
   private def upstreamLinks(graphNode: GraphNode): Set[String] = graphNode match {
-    case ogin: OuterGraphInputNode => Set(s"${ogin.linkToOuterGraph.graphId} -> ${ogin.singleOutputPort.graphId} [style=dashed arrowhead=none]")
+    case ogin: OuterGraphInputNode =>
+      Set(s"${ogin.linkToOuterGraph.graphId} -> ${ogin.singleOutputPort.graphId} [style=dashed arrowhead=none]")
     case _ =>
       for {
         inputPort <- graphNode.inputPorts
@@ -73,13 +70,13 @@ class WomGraph(graphName: String, graph: Graph) {
       // Don't include the scatter expression input port here since they're added later in `internalScatterNodesAndLinks`
       // Round up the gathered output ports so it's obvious they're being gathered.
       s"""
-        |${combine((s.inputPorts -- s.scatterCollectionExpressionNodes.flatMap(_.inputPorts)) map portLine)}
-        |subgraph $nextCluster {
-        |  style=${s.graphStyle};
-        |  fillcolor=${s.graphFillColor}
-        |  "${UUID.randomUUID}" [shape=plaintext label="gather ports"]
-        |${indentAndCombine(s.outputPorts map portLine)}
-        |}
+         |${combine((s.inputPorts -- s.scatterCollectionExpressionNodes.flatMap(_.inputPorts)) map portLine)}
+         |subgraph $nextCluster {
+         |  style=${s.graphStyle};
+         |  fillcolor=${s.graphFillColor}
+         |  "${UUID.randomUUID}" [shape=plaintext label="gather ports"]
+         |${indentAndCombine(s.outputPorts map portLine)}
+         |}
       """.stripMargin
     case _ => combine((graphNode.outputPorts ++ graphNode.inputPorts) map portLine)
   }
@@ -124,7 +121,9 @@ class WomGraph(graphName: String, graph: Graph) {
          |""".stripMargin
     }
 
-    val outputLinks = scatter.outputMapping map { outputPort => s"${outputPort.outputToGather.singleInputPort.graphId} -> ${outputPort.graphId} [style=dashed arrowhead=none]" }
+    val outputLinks = scatter.outputMapping map { outputPort =>
+      s"${outputPort.outputToGather.singleInputPort.graphId} -> ${outputPort.graphId} [style=dashed arrowhead=none]"
+    }
     innerGraph.withLinks(outputLinks)
   }
 
@@ -139,12 +138,13 @@ class WomGraph(graphName: String, graph: Graph) {
          |""".stripMargin
     }
 
-    val outputLinks = conditional.conditionalOutputPorts map { outputPort => s"${outputPort.outputToExpose.singleInputPort.graphId} -> ${outputPort.graphId} [style=dashed arrowhead=none]" }
+    val outputLinks = conditional.conditionalOutputPorts map { outputPort =>
+      s"${outputPort.outputToExpose.singleInputPort.graphId} -> ${outputPort.graphId} [style=dashed arrowhead=none]"
+    }
     innerGraph.withLinks(outputLinks)
   }
 
-  def internalSubworkflowNodesAndLinks(subworkflow: WorkflowCallNode): NodesAndLinks = {
-
+  def internalSubworkflowNodesAndLinks(subworkflow: WorkflowCallNode): NodesAndLinks =
     listAllGraphNodes(subworkflow.callable.innerGraph) wrapNodes { n =>
       s"""
          |subgraph $nextCluster {
@@ -154,14 +154,11 @@ class WomGraph(graphName: String, graph: Graph) {
          |}
          |""".stripMargin
     }
-  }
 
   private def nextCluster: String = "cluster_" + clusterCount.getAndIncrement()
 }
 
 object WomGraph {
-
-  implicit val cwlPreProcessor = CwlPreProcessor.noLogging
 
   final case class WorkflowDigraph(workflowName: String, digraph: NodesAndLinks)
   final case class NodesAndLinks(nodes: Set[String], links: Set[String]) {
@@ -174,11 +171,12 @@ object WomGraph {
   }
 
   def fromFiles(mainFile: String) = {
-    val graph = if (mainFile.toLowerCase().endsWith("wdl")) womExecutableFromWdl(mainFile) else womExecutableFromCwl(mainFile)
+    val graph = womExecutableFromWdl(mainFile)
     new WomGraph("workflow", graph)
   }
 
-  private def readFile(filePath: String): String = Files.readAllLines(Paths.get(filePath)).asScala.mkString(System.lineSeparator())
+  private def readFile(filePath: String): String =
+    Files.readAllLines(Paths.get(filePath)).asScala.mkString(System.lineSeparator())
 
   private def womExecutableFromWdl(filePath: String): Graph = {
     val workflowFileString = readFile(filePath)
@@ -188,34 +186,35 @@ object WomGraph {
       firstLine.startsWith("version 1.0")
     }
     val womBundle: Checked[WomBundle] = if (version1) {
-      val converter: CheckedAtoB[File, WomBundle] = fileToAst andThen wrapAst andThen astToFileElement.map(FileElementToWomBundleInputs(_, "{}", convertNestedScatterToSubworkflow = true, List.empty, List.empty, workflowDefinitionElementToWomWorkflowDefinition, taskDefinitionElementToWomTaskDefinition)) andThen fileElementToWomBundle
+      val converter: CheckedAtoB[File, WomBundle] = fileToAst andThen wrapAst andThen astToFileElement.map(
+        FileElementToWomBundleInputs(
+          _,
+          "{}",
+          convertNestedScatterToSubworkflow = true,
+          List.empty,
+          List.empty,
+          workflowDefinitionElementToWomWorkflowDefinition,
+          taskDefinitionElementToWomTaskDefinition
+        )
+      ) andThen fileElementToWomBundle
       converter.run(File(filePath))
     } else {
 
-      WdlNamespaceWithWorkflow.load(readFile(filePath), Seq(WdlNamespace.fileResolver _)).toChecked.flatMap(_.toWomBundle)
+      WdlNamespaceWithWorkflow
+        .load(readFile(filePath), Seq(WdlNamespace.fileResolver _))
+        .toChecked
+        .flatMap(_.toWomBundle)
     }
 
     womBundle match {
-      case Right(wom) if (wom.allCallables.values.toSet.filterByType[WorkflowDefinition]: Set[WorkflowDefinition]).size == 1 => (wom.allCallables.values.toSet.filterByType[WorkflowDefinition]: Set[WorkflowDefinition]).head.graph
+      case Right(wom)
+          if (wom.allCallables.values.toSet.filterByType[WorkflowDefinition]: Set[WorkflowDefinition]).size == 1 =>
+        (wom.allCallables.values.toSet.filterByType[WorkflowDefinition]: Set[WorkflowDefinition]).head.graph
       case Right(_) => throw new Exception("Can only 'wom graph' a WDL with exactly one workflow")
       case Left(errors) =>
-        val formattedErrors = errors.toList.mkString(System.lineSeparator(), System.lineSeparator(), System.lineSeparator())
+        val formattedErrors =
+          errors.toList.mkString(System.lineSeparator(), System.lineSeparator(), System.lineSeparator())
         throw new Exception(s"Failed to create WOM: $formattedErrors")
-    }
-  }
-
-  private def womExecutableFromCwl(filePath: String): Graph = {
-    import cwl.AcceptAllRequirements
-    (for {
-      clt <- CwlDecoder.decodeCwlFile(File(filePath)).
-        value.
-        unsafeRunSync()
-      inputs = clt.requiredInputs
-      fakedInputs = JsObject(inputs map { i => i._1 -> fakeInput(i._2) })
-      wom <- clt.womExecutable(AcceptAllRequirements, Option(fakedInputs.prettyPrint), NoIoFunctionSet, strictValidation = false)
-    } yield wom) match {
-      case Right(womExecutable) => womExecutable.graph
-      case Left(e) => throw new Exception(s"Can't build WOM executable from CWL: ${e.toList.mkString("\n", "\n", "\n")}")
     }
   }
 
@@ -229,6 +228,7 @@ object WomGraph {
     case _: WomOptionalType => JsNull
     case WomMapType(_, valueType) => JsObject(Map("0" -> fakeInput(valueType)))
     case WomArrayType(innerType) => JsArray(Vector(fakeInput(innerType)))
-    case WomPairType(leftType, rightType) => JsObject(Map("left" -> fakeInput(leftType), "right" -> fakeInput(rightType)))
+    case WomPairType(leftType, rightType) =>
+      JsObject(Map("left" -> fakeInput(leftType), "right" -> fakeInput(rightType)))
   }
 }
