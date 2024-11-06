@@ -174,7 +174,7 @@ trait AwsBatchJobDefinitionBuilder {
       case AWSBatchStorageSystems.s3 => "/var/scratch/fetch_and_run.sh"
       case _ =>  context.commandText
     }
-    val packedCommand = packCommand("/bin/bash", "-c", cmdName)
+    val packedCommand = packCommand(context.jobShell, "-c", cmdName)
     val volumes =  buildVolumes( context.runtimeAttributes.disks, context.fsxMntPoint)
     val mountPoints = buildMountPoints( context.runtimeAttributes.disks, context.fsxMntPoint)
     val logGroupName = context.runtimeAttributes.logGroupName
@@ -300,6 +300,7 @@ object AwsBatchJobDefinitionContext
 
 case class AwsBatchJobDefinitionContext(
             runtimeAttributes: AwsBatchRuntimeAttributes,
+            jobShell: String,
             commandText: String,
             dockerRcPath: String,
             dockerStdoutPath: String,
@@ -318,6 +319,7 @@ case class AwsBatchJobDefinitionContext(
   override def toString: String =
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
       .append("runtimeAttributes", runtimeAttributes)
+      .append("jobShell", jobShell)
       .append("commandText", commandText)
       .append("dockerRcPath", dockerRcPath)
       .append("dockerStderrPath", dockerStderrPath)

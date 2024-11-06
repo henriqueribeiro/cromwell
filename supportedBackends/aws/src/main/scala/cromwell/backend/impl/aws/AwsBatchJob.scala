@@ -77,6 +77,7 @@ import com.typesafe.config.ConfigFactory
   */
 final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
                              runtimeAttributes: AwsBatchRuntimeAttributes, // config or WDL/CWL
+                             jobShell: String, // Calculated from StandardAsyncExecutionActor
                              commandLine: String, // WDL/CWL
                              commandScript: String, // WDL/CWL
                              dockerRc: String, // Calculated from StandardAsyncExecutionActor
@@ -710,6 +711,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
       }
       val jobDefinitionContext = AwsBatchJobDefinitionContext(
         runtimeAttributes = runtimeAttributes,
+        jobShell = jobShell,
         commandText = commandStr,
         dockerRcPath = dockerRc,
         dockerStdoutPath = dockerStdout,
@@ -865,6 +867,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
       .append("jobDescriptor", jobDescriptor)
       .append("runtimeAttributes", runtimeAttributes)
+      .append("jobShell", jobShell)
       .append("commandLine", commandLine)
       .append("commandScript", commandScript)
       .append("dockerRc", dockerRc)
