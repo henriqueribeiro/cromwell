@@ -15,11 +15,11 @@ object RetryableRequestSupport {
     * The default count is `5` and may be customized with `system.io.number-of-attempts`.
     */
   def isRetryable(failure: Throwable): Boolean = failure match {
-    case gcs: StorageException => gcs.isRetryable ||
+    case gcs: StorageException =>
+      gcs.isRetryable ||
       isRetryable(gcs.getCause) ||
       AdditionalRetryableHttpCodes.contains(gcs.getCode) ||
-      Option(gcs.getMessage).exists(msg =>
-        AdditionalRetryableErrorMessages.contains(msg.toLowerCase))
+      Option(gcs.getMessage).exists(msg => AdditionalRetryableErrorMessages.contains(msg.toLowerCase))
     case _: SSLException => true
     case _: BatchFailedException => true
     case _: ChecksumFailedException => true
@@ -68,26 +68,24 @@ object RetryableRequestSupport {
     isGcsRateLimitException(failure)
   }
 
-  def isGcs500(failure: Throwable): Boolean = {
+  def isGcs500(failure: Throwable): Boolean =
     Option(failure.getMessage).exists(msg =>
       msg.contains("Could not read from gs") &&
-      msg.contains("500 Internal Server Error")
+        msg.contains("500 Internal Server Error")
     )
-  }
 
-  def isGcs503(failure: Throwable): Boolean = {
+  def isGcs503(failure: Throwable): Boolean =
     Option(failure.getMessage).exists(msg =>
       msg.contains("Could not read from gs") &&
-      msg.contains("503 Service Unavailable")
+        msg.contains("503 Service Unavailable")
     )
-  }
 
-  def isGcs504(failure: Throwable): Boolean = {
+  def isGcs504(failure: Throwable): Boolean =
     Option(failure.getMessage).exists(msg =>
       msg.contains("Could not read from gs") &&
-      msg.contains("504 Gateway Timeout")
+        msg.contains("504 Gateway Timeout")
     )
-  }
+  
   // AWS timeout error
   def isAws504(failure: Throwable): Boolean = {
     Option(failure.getMessage).exists(msg =>

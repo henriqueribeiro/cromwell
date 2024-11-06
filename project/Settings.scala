@@ -1,6 +1,5 @@
 import ContinuousIntegration._
 import Dependencies._
-import GenerateRestApiDocs._
 import Merging._
 import Publishing._
 import Testing._
@@ -77,12 +76,13 @@ object Settings {
     organization := "org.broadinstitute",
     scalaVersion := ScalaVersion,
     resolvers ++= additionalResolvers,
-    // Don't run tasks in parallel, especially helps in low CPU environments like Travis
-    Global / parallelExecution := false,
+    Global / parallelExecution := true,
+    // Seems to cause race conditions in tests, that are not pertinent to what's being tested
+    Test / parallelExecution := false,
     Global / concurrentRestrictions ++= List(
-      // Don't run any other tasks while running tests, especially helps in low CPU environments like Travis
+      // Don't run any other tasks while running tests
       Tags.exclusive(Tags.Test),
-      // Only run tests on one sub-project at a time, especially helps in low CPU environments like Travis
+      // Only run tests on one sub-project at a time
       Tags.limit(Tags.Test, 1)
     ),
     dependencyOverrides ++= cromwellDependencyOverrides,
@@ -97,6 +97,17 @@ object Settings {
       "org.typelevel" % "simulacrum-scalafix-annotations_2.13"
     )
   )
+
+  val pact4sSettings = sharedSettings ++ List(
+    libraryDependencies ++= pact4sDependencies,
+    /**
+      * Invoking pact tests from root project (sbt "project pact" test)
+      * will launch tests in a separate JVM context that ensures contracts
+      * are written to the pact/target/pacts folder. Otherwise, contracts
+      * will be written to the root folder.
+      */
+    Test / fork := true
+  ) ++ assemblySettings
 
   /*
       Docker instructions to install Google Cloud SDK image in docker image. It also installs `crcmod` which
@@ -115,21 +126,21 @@ object Settings {
       Instructions.Env("PATH", "$PATH:/usr/local/gcloud/google-cloud-sdk/bin"),
       // instructions to install `crcmod`
       Instructions.Run("apt-get -y update"),
-      Instructions.Run("apt-get -y install python3.8"),
-      Instructions.Run("apt -y install python3-pip"),
-      Instructions.Run("apt-get -y install gcc python3-dev python3-setuptools"),
+      Instructions.Run("apt-get -y install python3.11"),
+      Instructions.Run("apt-get -y install python3-pip"),
+      Instructions.Run("apt-get -y install wget gcc python3-dev python3-setuptools"),
       Instructions.Run("pip3 uninstall crcmod"),
       Instructions.Run("pip3 install --no-cache-dir -U crcmod"),
       Instructions.Run("update-alternatives --install /usr/bin/python python /usr/bin/python3 1"),
       Instructions.Env("CLOUDSDK_PYTHON", "python3"),
       // instructions to install Google Cloud SDK
-      Instructions.Run("curl https://dl.google.com/dl/cloudsdk/release/google-cloud-sdk.tar.gz > /tmp/google-cloud-sdk.tar.gz"),
+      Instructions.Run("wget https://dl.google.com/dl/cloudsdk/release/google-cloud-sdk.tar.gz -O /tmp/google-cloud-sdk.tar.gz"),
       Instructions.Run("""mkdir -p /usr/local/gcloud \
                          | && tar -C /usr/local/gcloud -xvf /tmp/google-cloud-sdk.tar.gz \
                          | && /usr/local/gcloud/google-cloud-sdk/install.sh""".stripMargin),
-      // instructions to install `getm`. Pin to version 0.0.4 as the behaviors of future versions with respect to
+      // instructions to install `getm`. Pin to version 0.0.5 as the behaviors of future versions with respect to
       // messages or exit codes may change.
-      Instructions.Run("pip3 install getm==0.0.4")
+      Instructions.Run("pip3 install getm==0.0.5")
     )
   )
 
@@ -208,7 +219,6 @@ object Settings {
         _
           .disablePlugins(AssemblyPlugin)
           .settings(publish := {})
-          .settings(generateRestApiDocsSettings)
           .settings(ciSettings)
           .settings(rootPublishingSettings)
       )

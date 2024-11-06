@@ -58,9 +58,10 @@ startup_funnel
 # read_file_limits:          Fail only in Travis for unknown reason (Note that the draft 3 version does not fail)
 # docker_hash_dockerhub:     Prone to request rate limiting by Dockerhub
 
-# Limiting Centaur to 4 threads here in order to try to prevent exceeding the OS's max open files limit: BA-6153
+# Setting threads to 8 upon moving from Travis to Github Actions. If we run into problems with
+# exceeding the OS's max open files limit, reduce. See BA-6153.
 cromwell::build::run_centaur \
-    -p 2 \
+    -p 8 \
     -e docker_hash_dockerhub \
     -e call_cache_capoeira_local \
     -e draft3_call_cache_capoeira_local \
@@ -71,7 +72,6 @@ cromwell::build::run_centaur \
     -e non_root_specified_user \
     -e write_lines_files \
     -e draft3_read_write_functions_local \
-    -e cwl_input_json \
     -e directory_type_local \
 
 cromwell::build::generate_code_coverage

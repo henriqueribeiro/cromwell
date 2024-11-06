@@ -36,7 +36,7 @@ import cromwell.backend.impl.aws.{AWSBatchStorageSystems, AwsBatchBackendInitial
 import cromwell.backend.io.JobPaths
 import cromwell.backend.standard.callcaching.{StandardCacheHitCopyingActor, StandardCacheHitCopyingActorParams}
 import cromwell.core.CallOutputs
-import cromwell.core.io.{DefaultIoCommandBuilder, IoCommand, IoCommandBuilder, IoTouchCommand}
+import cromwell.core.io.{DefaultIoCommandBuilder, IoCommand, IoCommandBuilder}
 import cromwell.core.path.Path
 import cromwell.core.simpleton.{WomValueBuilder, WomValueSimpleton}
 import cromwell.filesystems.s3.batch.S3BatchCommandBuilder
@@ -48,22 +48,24 @@ import scala.util.Try
 class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyingActorParams) extends StandardCacheHitCopyingActor(standardParams) with AwsBatchJobCachingActorHelper{
   private val batchAttributes = BackendInitializationData
     .as[AwsBatchBackendInitializationData](standardParams.backendInitializationDataOption)
-    .configuration.batchAttributes
+    .configuration
+    .batchAttributes
 
   override protected val commandBuilder: IoCommandBuilder = batchAttributes.fileSystem match {
-    case AWSBatchStorageSystems.s3  => S3BatchCommandBuilder
-    case  _ => DefaultIoCommandBuilder
+    case AWSBatchStorageSystems.s3 => S3BatchCommandBuilder
+    case _ => DefaultIoCommandBuilder
   }
   private val cachingStrategy = batchAttributes.duplicationStrategy
 
   override def processSimpletons(womValueSimpletons: Seq[WomValueSimpleton],
-                                 sourceCallRootPath: Path,
-                                ): Try[(CallOutputs, Set[IoCommand[_]])] = {
+                                 sourceCallRootPath: Path
+  ): Try[(CallOutputs, Set[IoCommand[_]])] =
     (batchAttributes.fileSystem, cachingStrategy) match {
-      case (AWSBatchStorageSystems.s3, UseOriginalCachedOutputs) =>
-        val touchCommands: Seq[Try[IoTouchCommand]] = womValueSimpletons collect {
+      case (AWSBatchStorageSystems.s3, UseOriginalCachedOutputs) => 
+        val touchCommands: Seq[Try[IoCommand[_]]] = womValueSimpletons collect {
+          // only work on WomFiles, skip others? 
           case WomValueSimpleton(_, wdlFile: WomFile) =>
-            getPath(wdlFile.value) flatMap S3BatchCommandBuilder.touchCommand
+              getPath(wdlFile.value).flatMap(S3BatchCommandBuilder.existsOrThrowCommand)
         }
 
         TryUtil.sequence(touchCommands) map {
@@ -71,7 +73,6 @@ class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyin
         }
       case (_, _) => super.processSimpletons(womValueSimpletons, sourceCallRootPath)
     }
-  }
 
   // detritus files : job script, stdout, stderr and RC files.
   override def processDetritus(sourceJobDetritusFiles: Map[String, String]
@@ -88,7 +89,7 @@ class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyin
           Try {
             // PROD-444: Keep It Short and Simple: Throw on the first error and let the outer Try catch-and-re-wrap
             (newDetritus + (JobPaths.CallRootPathKey -> destinationCallRootPath)) ->
-              newDetritus.values.map(S3BatchCommandBuilder.touchCommand(_).get).toSet
+              newDetritus.values.map(S3BatchCommandBuilder.existsOrThrowCommand(_).get).toSet
           }
         }
       case (_, _) => super.processDetritus(sourceJobDetritusFiles)
@@ -97,15 +98,16 @@ class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyin
   override protected def additionalIoCommands(sourceCallRootPath: Path,
                                               originalSimpletons: Seq[WomValueSimpleton],
                                               newOutputs: CallOutputs,
-                                              originalDetritus:  Map[String, String],
-                                              newDetritus: Map[String, Path]): Try[List[Set[IoCommand[_]]]] = Try {
-    (batchAttributes.fileSystem, cachingStrategy)  match {
+                                              originalDetritus: Map[String, String],
+                                              newDetritus: Map[String, Path]
+  ): Try[List[Set[IoCommand[_]]]] = Try {
+    (batchAttributes.fileSystem, cachingStrategy) match {
       case (AWSBatchStorageSystems.s3, UseOriginalCachedOutputs) =>
-            val content =
-              s"""
-                 |This directory does not contain any output files because this job matched an identical job that was previously run, thus it was a cache-hit.
-                 |Cromwell is configured to not copy outputs during call caching. To change this, edit the filesystems.aws.caching.duplication-strategy field in your backend configuration.
-                 |The original outputs can be found at this location: ${sourceCallRootPath.pathAsString}
+        val content =
+          s"""
+             |This directory does not contain any output files because this job matched an identical job that was previously run, thus it was a cache-hit.
+             |Cromwell is configured to not copy outputs during call caching. To change this, edit the filesystems.aws.caching.duplication-strategy field in your backend configuration.
+             |The original outputs can be found at this location: ${sourceCallRootPath.pathAsString}
       """.stripMargin
 
         // PROD-444: Keep It Short and Simple: Throw on the first error and let the outer Try catch-and-re-wrap

@@ -34,7 +34,7 @@ package cromwell.backend.impl.aws
 import scala.collection.mutable.ListBuffer
 import cromwell.backend.BackendJobDescriptor
 import cromwell.backend.io.JobPaths
-import software.amazon.awssdk.services.batch.model.{ContainerProperties, EvaluateOnExit, Host, KeyValuePair, LogConfiguration, MountPoint, ResourceRequirement, ResourceType, RetryAction, RetryStrategy, Ulimit, Volume}
+import software.amazon.awssdk.services.batch.model.{ContainerProperties, EvaluateOnExit, Host, KeyValuePair, LinuxParameters, LogConfiguration, MountPoint, ResourceRequirement, ResourceType, RetryAction, RetryStrategy, Ulimit, Volume}
 import cromwell.backend.impl.aws.io.AwsBatchVolume
 
 import scala.jdk.CollectionConverters._
@@ -42,7 +42,7 @@ import java.security.MessageDigest
 import org.apache.commons.lang3.builder.{ToStringBuilder, ToStringStyle}
 import org.slf4j.{Logger, LoggerFactory}
 import wdl4s.parser.MemoryUnit
-
+import wom.format.MemorySize
 
 /**
   * Responsible for the creation of the job definition.
@@ -63,18 +63,16 @@ sealed trait AwsBatchJobDefinition {
   def retryStrategy: RetryStrategy
   def name: String
 
-  override def toString: String = {
+  override def toString: String =
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
       .append("name", name)
       .append("containerProperties", containerProperties)
       .append("retryStrategy", retryStrategy)
       .build
-  }
 }
 
 trait AwsBatchJobDefinitionBuilder {
   val Log: Logger = LoggerFactory.getLogger(StandardAwsBatchJobDefinitionBuilder.getClass)
-
 
   /** Gets a builder, seeded with appropriate portions of the container properties
    *
@@ -93,12 +91,14 @@ trait AwsBatchJobDefinitionBuilder {
 
       //all the configured disks plus the fetch and run volume and the aws-cli volume
       disks.map(d => d.toVolume()).toList ++ List(
-        Volume.builder()
-        .name("fetchAndRunScript")
-        .host(Host.builder().sourcePath("/usr/local/bin/fetch_and_run.sh").build())
-        .build(),
-        //the aws-cli location on the EC2
-        Volume.builder()
+        Volume
+          .builder()
+          .name("fetchAndRunScript")
+          .host(Host.builder().sourcePath("/usr/local/bin/fetch_and_run.sh").build())
+          .build(),
+        // the aws-cli location on the EC2
+        Volume
+          .builder()
           .name("awsCliHome")
           .host(Host.builder().sourcePath("/usr/local/aws-cli").build())
           .build(),
@@ -120,16 +120,17 @@ trait AwsBatchJobDefinitionBuilder {
 
       //all the configured disks plus the fetch and run mount point and the AWS cli mount point
       disks.map(_.toMountPoint).toList ++ List(
-        MountPoint.builder()
+        MountPoint
+          .builder()
           .readOnly(true)
           .sourceVolume("fetchAndRunScript")
           .containerPath("/var/scratch/fetch_and_run.sh")
           .build(),
-
-        MountPoint.builder()
+        MountPoint
+          .builder()
           .readOnly(true)
           .sourceVolume("awsCliHome")
-          //where the aws-cli will be on the container
+          // where the aws-cli will be on the container
           .containerPath("/usr/local/aws-cli")
           .build(),
         // the location of the instance-id on the container, used to tag the instance
@@ -153,9 +154,20 @@ trait AwsBatchJobDefinitionBuilder {
       ).toList
     }
 
-    def buildName(imageName: String, packedCommand: String, volumes: List[Volume], mountPoints: List[MountPoint], env: Seq[KeyValuePair], ulimits: List[Ulimit], efsDelocalize: Boolean, efsMakeMD5: Boolean, tagResources: Boolean, logGroupName: String): String = {
-      s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}:${tagResources.toString}:$logGroupName"
-    }
+    def buildName(
+      imageName: String,
+      packedCommand: String,
+      volumes: List[Volume],
+      mountPoints: List[MountPoint],
+      env: Seq[KeyValuePair],
+      ulimits: List[Ulimit],
+      efsDelocalize: Boolean,
+      efsMakeMD5: Boolean,
+      tagResources: Boolean,
+      logGroupName: String,
+      sharedMemorySize: MemorySize): String = {
+        s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}:${tagResources.toString}:$logGroupName:${sharedMemorySize.to(MemoryUnit.MB).amount.toInt}"
+      }
 
     val environment = List.empty[KeyValuePair]
     val cmdName = context.runtimeAttributes.fileSystem match {
@@ -189,9 +201,9 @@ trait AwsBatchJobDefinitionBuilder {
       efsDelocalize,
       efsMakeMD5,
       tagResources,
-      logGroupName
+      logGroupName,
+      context.runtimeAttributes.sharedMemorySize
     )
-
     // To reuse job definition for gpu and gpu-runs, we will create a job definition that does not gpu requirements
     // since aws batch does not allow you to set gpu as 0 when you dont need it. you will always need cpu and memory
     (ContainerProperties.builder()
@@ -205,7 +217,10 @@ trait AwsBatchJobDefinitionBuilder {
       .volumes(volumes.asJava)
       .mountPoints(mountPoints.asJava)
       .environment(environment.asJava)
-      .ulimits(ulimits.asJava),
+      .ulimits(ulimits.asJava)
+      .linuxParameters(
+      LinuxParameters.builder().sharedMemorySize(context.runtimeAttributes.sharedMemorySize.to(MemoryUnit.MB).amount.toInt).build() // Convert MemorySize to MB
+    ),
      containerPropsName)
   }
 
@@ -243,10 +258,9 @@ trait AwsBatchJobDefinitionBuilder {
     val lim = 20480
     val packedCommand = mainCommand.length() match {
       case len if len <= lim => mainCommand
-      case len if len > lim => {
+      case len if len > lim =>
         rc += "gzipdata" // This is hard coded in our agent and must be the first item
         gzip(mainCommand)
-      }
     }
     rc += shell
     rc += options
@@ -301,12 +315,12 @@ case class AwsBatchJobDefinitionContext(
             tagResources: Option[Boolean]
             ) {
 
-  override def toString: String = {
+  override def toString: String =
     new ToStringBuilder(this, ToStringStyle.JSON_STYLE)
       .append("runtimeAttributes", runtimeAttributes)
       .append("commandText", commandText)
       .append("dockerRcPath", dockerRcPath)
-      .append("dockerStderrPath",dockerStderrPath)
+      .append("dockerStderrPath", dockerStderrPath)
       .append("dockerStdoutPath", dockerStdoutPath)
       .append("jobDescriptor", jobDescriptor)
       .append("jobPaths", jobPaths)
@@ -318,5 +332,4 @@ case class AwsBatchJobDefinitionContext(
       .append("efsDelocalize", efsDelocalize)
       .append("tagResources", tagResources)
       .build
-  }
 }

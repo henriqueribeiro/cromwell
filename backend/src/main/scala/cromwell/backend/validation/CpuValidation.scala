@@ -28,7 +28,7 @@ object CpuValidation {
   lazy val optionalMin: OptionalRuntimeAttributesValidation[Int Refined Positive] = instanceMin.optional
   lazy val instanceMax: RuntimeAttributesValidation[Int Refined Positive] = new CpuValidation(CpuMaxKey)
   lazy val optionalMax: OptionalRuntimeAttributesValidation[Int Refined Positive] = instanceMax.optional
-
+  
   lazy val defaultMin: WomValue = WomInteger(1)
   def configDefaultWomValue(config: Option[Config]): Option[WomValue] = instance.configDefaultWomValue(config)
 }
