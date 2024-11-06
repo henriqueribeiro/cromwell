@@ -36,7 +36,7 @@ import cromwell.backend.impl.aws.{AWSBatchStorageSystems, AwsBatchBackendInitial
 import cromwell.backend.io.JobPaths
 import cromwell.backend.standard.callcaching.{StandardCacheHitCopyingActor, StandardCacheHitCopyingActorParams}
 import cromwell.core.CallOutputs
-import cromwell.core.io.{DefaultIoCommandBuilder, IoCommand, IoCommandBuilder, IoTouchCommand}
+import cromwell.core.io.{DefaultIoCommandBuilder, IoCommand, IoCommandBuilder}
 import cromwell.core.path.Path
 import cromwell.core.simpleton.{WomValueBuilder, WomValueSimpleton}
 import cromwell.filesystems.s3.batch.S3BatchCommandBuilder
@@ -61,10 +61,11 @@ class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyin
                                  sourceCallRootPath: Path
   ): Try[(CallOutputs, Set[IoCommand[_]])] =
     (batchAttributes.fileSystem, cachingStrategy) match {
-      case (AWSBatchStorageSystems.s3, UseOriginalCachedOutputs) =>
-        val touchCommands: Seq[Try[IoTouchCommand]] = womValueSimpletons collect {
+      case (AWSBatchStorageSystems.s3, UseOriginalCachedOutputs) => 
+        val touchCommands: Seq[Try[IoCommand[_]]] = womValueSimpletons collect {
+          // only work on WomFiles, skip others? 
           case WomValueSimpleton(_, wdlFile: WomFile) =>
-            getPath(wdlFile.value) flatMap S3BatchCommandBuilder.touchCommand
+              getPath(wdlFile.value).flatMap(S3BatchCommandBuilder.existsOrThrowCommand)
         }
 
         TryUtil.sequence(touchCommands) map {
@@ -88,7 +89,7 @@ class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyin
           Try {
             // PROD-444: Keep It Short and Simple: Throw on the first error and let the outer Try catch-and-re-wrap
             (newDetritus + (JobPaths.CallRootPathKey -> destinationCallRootPath)) ->
-              newDetritus.values.map(S3BatchCommandBuilder.touchCommand(_).get).toSet
+              newDetritus.values.map(S3BatchCommandBuilder.existsOrThrowCommand(_).get).toSet
           }
         }
       case (_, _) => super.processDetritus(sourceJobDetritusFiles)
