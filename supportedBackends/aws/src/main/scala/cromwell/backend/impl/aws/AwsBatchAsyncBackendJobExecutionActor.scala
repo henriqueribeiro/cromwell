@@ -74,7 +74,7 @@ import software.amazon.awssdk.services.batch.model._
 import wom.callable.Callable.OutputDefinition
 import wom.core.FullyQualifiedName
 import wom.expression.NoIoFunctionSet
-import wom.types.{WomArrayType, WomSingleFileType}
+import wom.types.{WomArrayType, WomType, WomSingleFileType,WomOptionalType}
 import wom.values._
 
 import scala.concurrent._
@@ -245,32 +245,42 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   /**
     * Takes two arrays of remote and local WOM File paths and generates the necessary AwsBatchInputs.
     */
+
+  def isOptionalInput(input: WomType): Boolean = {
+    input match {
+      case WomOptionalType(_) => true
+      case _ => false
+    }
+  }
+
   private def inputsFromWomFiles(
       namePrefix: String,
       remotePathArray: Seq[WomFile],
       localPathArray: Seq[WomFile],
       jobDescriptor: BackendJobDescriptor,
+      isOptional: Seq[Boolean],  // New parameter
       flag: Boolean
   ): Iterable[AwsBatchInput] = {
 
-    (remotePathArray zip localPathArray zipWithIndex) flatMap {
-      case ((remotePath, localPath), index) =>
+    (remotePathArray zip localPathArray zip isOptional zipWithIndex) flatMap {
+      case (((remotePath, localPath), optional), index) =>
         var localPathString = localPath.valueString
         if (localPathString.startsWith("s3://")) {
           localPathString = localPathString.replace("s3://", "")
         } else if (localPathString.startsWith("s3:/")) {
           localPathString = localPathString.replace("s3:/", "")
         }
+        //val isOptional = womType.isInstanceOf[WomOptionalType]
         Seq(
           AwsBatchFileInput(
             s"$namePrefix-$index",
             remotePath.valueString,
             DefaultPathBuilder.get(localPathString),
-            workingDisk
+            workingDisk,
+            optional
           )
         )
     }
-
   }
 
   /**
@@ -314,12 +324,12 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         files.map(_.file),
         files.map(localizationPath),
         jobDescriptor,
+        files.map(_.file.womType).map(isOptionalInput), 
         false
       )
     }
 
-    // Collect all WomFiles from inputs to the call.
-    val callInputFiles: Map[FullyQualifiedName, Seq[WomFile]] = jobDescriptor.fullyQualifiedInputs safeMapValues {
+    val callInputFiles: Map[FullyQualifiedName, Seq[(WomFile, Boolean)]] = jobDescriptor.fullyQualifiedInputs safeMapValues {
       womFile =>
         val arrays: Seq[WomArray] = womFile collectAsSeq { case womFile: WomFile =>
           val files: List[WomSingleFile] = DirectoryFunctions
@@ -328,27 +338,32 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
             .get
           WomArray(WomArrayType(WomSingleFileType), files)
         }
-
-        arrays.flatMap(_.value).collect { case womFile: WomFile =>
-          womFile
+        val isOptional = isOptionalInput(womFile.womType)
+        // Flatten and collect files along with the outer womFile's optional status
+        arrays.flatMap(_.value).collect { case file: WomFile =>
+          (file, isOptional)
         }
     }
-    
-    val callInputInputs = callInputFiles flatMap { case (name, files) =>
+
+    val callInputInputs = callInputFiles flatMap { case (name, filesWithOptional) =>
+      val files = filesWithOptional.map(_._1)            // Extract the WomFiles
+      val isOptional = filesWithOptional.map(_._2)         // Extract the corresponding WomTypes
       inputsFromWomFiles(
         name,
         files,
         files.map(relativeLocalizationPath),
         jobDescriptor,
+        isOptional,                                     // Pass womTypes to inputsFromWomFiles
         true
       )
     }
-    // this is a list : AwsBatchInput(name_in_wf, origin_such_as_s3, target_in_docker_relative, target_in_docker_disk[name mount] )
+    // this is a list : AwsBatchInput(name_in_wf, origin_such_as_s3, target_in_docker_relative, target_in_docker_disk[name mount], is_optional_file )
     val scriptInput: AwsBatchInput = AwsBatchFileInput(
       "script",
       jobPaths.script.pathAsString,
       DefaultPathBuilder.get(jobPaths.script.pathWithoutScheme),
-      workingDisk
+      workingDisk,
+      false
     )
 
     Set(scriptInput) ++ writeFunctionInputs ++ callInputInputs
@@ -397,7 +412,15 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       jobDescriptor: BackendJobDescriptor
   ): Set[AwsBatchFileOutput] = {
     import cats.syntax.validated._
-    def evaluateFiles(output: OutputDefinition): List[WomFile] =
+
+    def isOptionalOutput(output: OutputDefinition): Boolean = {
+      output.womType match {
+        case WomOptionalType(_) => true
+        case _ => false
+      }
+    }
+
+    def evaluateFiles(output: OutputDefinition): List[(WomFile, Boolean)] = {
       Try(
         output.expression
           .evaluateFiles(
@@ -405,20 +428,33 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
             NoIoFunctionSet,
             output.womType
           )
-          .map(_.toList map { _.file })
-      ).getOrElse(List.empty[WomFile].validNel)
+          .map(_.toList map { womFile => 
+            // Pair each WomFile with its optional status
+            (womFile.file, isOptionalOutput(output)) 
+          })
+      ).getOrElse(List.empty[(WomFile, Boolean)].validNel)
        .getOrElse(List.empty)
+    }
     
-    val womFileOutputs = jobDescriptor.taskCall.callable.outputs
-      .flatMap(evaluateFiles) map relativeLocalizationPath
-    val outputs: Seq[AwsBatchFileOutput] = womFileOutputs.distinct flatMap {
-      _.flattenFiles flatMap {
-        case unlistedDirectory: WomUnlistedDirectory =>
-          generateUnlistedDirectoryOutputs(unlistedDirectory)
-        case singleFile: WomSingleFile =>
-          generateAwsBatchSingleFileOutputs(singleFile)
-        case globFile: WomGlobFile => generateAwsBatchGlobFileOutputs(globFile)
-      }
+    val womFileOutputsEvaluated = jobDescriptor.taskCall.callable.outputs
+      .flatMap(evaluateFiles)  
+
+    val womFileOutputs = womFileOutputsEvaluated map { case (file, isOptional) => 
+      (relativeLocalizationPath(file), isOptional)
+    }
+
+    val flatmapped = womFileOutputs.distinct flatMap {
+      case (file, isOptional) => file.flattenFiles.map((_, isOptional))
+    }
+
+    // Generate AwsBatchFileOutput for each file based on type
+    val outputs: Seq[AwsBatchFileOutput] = flatmapped flatMap {
+      case (unlistedDirectory: WomUnlistedDirectory, _) =>
+        generateUnlistedDirectoryOutputs(unlistedDirectory)
+      case (singleFile: WomSingleFile, isOptional) =>
+        jobLogger.debug(s" file output: ${singleFile.value} of type ${singleFile.womType} -- optional : $isOptional")
+        generateAwsBatchSingleFileOutputs(singleFile, isOptional)
+      case (globFile: WomGlobFile, _) => generateAwsBatchGlobFileOutputs(globFile)
     }
 
     val additionalGlobOutput =
@@ -445,21 +481,23 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         makeSafeAwsBatchReferenceName(directoryListFile),
         listDestinationPath,
         DefaultPathBuilder.get(directoryListFile),
-        directoryDisk
+        directoryDisk,
+        false
       ),
       // The collection list file:
       AwsBatchFileOutput(
         makeSafeAwsBatchReferenceName(directoryPath),
         dirDestinationPath,
         DefaultPathBuilder.get(directoryPath + "*"),
-        directoryDisk
+        directoryDisk,
+        false
       )
     )
   }
 
   // used by generateAwsBatchOutputs, could potentially move this def within that function
   private def generateAwsBatchSingleFileOutputs(
-      womFile: WomSingleFile
+      womFile: WomSingleFile, isOptional: Boolean
   ): List[AwsBatchFileOutput] = {
     // rewrite this to create more flexibility
     val destination = configuration.fileSystem match {
@@ -477,11 +515,11 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     val output = if (configuration.efsMntPoint.isDefined &&
                      configuration.efsMntPoint.getOrElse("").equals(disk.toString.split(" ")(1)) &&
                      ! runtimeAttributes.efsDelocalize) {
-            // name: String, s3key: String, local: Path, mount: AwsBatchVolume
-            AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), womFile.value, relpath, disk)
+            // name: String, s3key: String, local: Path, mount: AwsBatchVolume, optionalFile
+            AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), womFile.value, relpath, disk, isOptional)
         } else {
             // if efs is not enabled, OR efs delocalization IS enabled, keep the s3 path as destination.
-            AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), URLDecoder.decode(destination,"UTF-8"), relpath, disk)
+            AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), URLDecoder.decode(destination,"UTF-8"), relpath, disk, isOptional)
         }
     List(output)
   }
@@ -549,9 +587,9 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     // We need both the glob directory and the glob list:
     List(
       // The glob directory:
-      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + "/" + "*").toString,globDirectoryDestinationPath, relpathDir, globDirectoryDisk),
+      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + "/" + "*").toString,globDirectoryDestinationPath, relpathDir, globDirectoryDisk, false),
       // The glob list file:
-      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + ".list").toString, globListFileDestinationPath, relpathList, globDirectoryDisk)
+      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + ".list").toString, globListFileDestinationPath, relpathList, globDirectoryDisk, false)
       // TODO: EVALUATE above vs below  (mainly the makeSafeAwsBatchReferenceName() routine)
       // The glob directory:
       // AwsBatchFileOutput(makeSafeAwsBatchReferenceName(globDirectory),
