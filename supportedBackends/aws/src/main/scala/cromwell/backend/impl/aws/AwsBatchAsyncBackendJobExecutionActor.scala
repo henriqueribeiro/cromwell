@@ -261,10 +261,8 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
           println(s"cast ${womType} as optional (case 1)")
           true
       case _: WomPrimitiveFileType => 
-          println(s"cast ${womType} as mandatory (case 2)")
           false
       case _: WomPrimitiveType =>
-          println(s"cast ${womType} as true (case 3)")
           true // WomPairTypes and WomCompositeTypes may have non-File components here which is fine.
       case WomArrayType(inner) => innerAreAllFileTypesInWomTypeOptional(inner)
       case WomMapType(_, inner) => innerAreAllFileTypesInWomTypeOptional(inner)
@@ -277,7 +275,6 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     // At the outermost level, primitives are never optional.
     womType match {
       case _: WomPrimitiveType => 
-          println(s"cast ${womType} as mandatory (case 4)")  
           false
       case _ => innerAreAllFileTypesInWomTypeOptional(womType)
     }
