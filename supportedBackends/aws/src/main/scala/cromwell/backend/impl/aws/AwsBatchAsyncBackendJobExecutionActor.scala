@@ -74,7 +74,15 @@ import software.amazon.awssdk.services.batch.model._
 import wom.callable.Callable.OutputDefinition
 import wom.core.FullyQualifiedName
 import wom.expression.NoIoFunctionSet
-import wom.types.{WomArrayType, WomType, WomSingleFileType,WomOptionalType}
+import wom.types.{WomArrayType, 
+                  WomType, 
+                  WomSingleFileType,
+                  WomOptionalType,
+                  WomPrimitiveFileType,
+                  WomPrimitiveType,
+                  WomMapType,
+                  WomPairType,
+                  WomCompositeType}
 import wom.values._
 
 import scala.concurrent._
@@ -245,11 +253,33 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   /**
     * Takes two arrays of remote and local WOM File paths and generates the necessary AwsBatchInputs.
     */
-
-  def isOptionalInput(input: WomType): Boolean = {
-    input match {
-      case WomOptionalType(_) => true
+  
+  // taken from the WomExpression trait:
+  private def areAllFilesOptional(womType: WomType): Boolean = {
+    def innerAreAllFileTypesInWomTypeOptional(womType: WomType): Boolean = womType match {
+      case WomOptionalType(_: WomPrimitiveFileType) => 
+          println(s"cast ${womType} as optional (case 1)")
+          true
+      case _: WomPrimitiveFileType => 
+          println(s"cast ${womType} as mandatory (case 2)")
+          false
+      case _: WomPrimitiveType =>
+          println(s"cast ${womType} as true (case 3)")
+          true // WomPairTypes and WomCompositeTypes may have non-File components here which is fine.
+      case WomArrayType(inner) => innerAreAllFileTypesInWomTypeOptional(inner)
+      case WomMapType(_, inner) => innerAreAllFileTypesInWomTypeOptional(inner)
+      case WomPairType(leftType, rightType) =>
+        innerAreAllFileTypesInWomTypeOptional(leftType) && innerAreAllFileTypesInWomTypeOptional(rightType)
+      case WomCompositeType(typeMap, _) => typeMap.values.forall(innerAreAllFileTypesInWomTypeOptional)
       case _ => false
+    }
+
+    // At the outermost level, primitives are never optional.
+    womType match {
+      case _: WomPrimitiveType => 
+          println(s"cast ${womType} as mandatory (case 4)")  
+          false
+      case _ => innerAreAllFileTypesInWomTypeOptional(womType)
     }
   }
 
@@ -270,7 +300,6 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         } else if (localPathString.startsWith("s3:/")) {
           localPathString = localPathString.replace("s3:/", "")
         }
-        //val isOptional = womType.isInstanceOf[WomOptionalType]
         Seq(
           AwsBatchFileInput(
             s"$namePrefix-$index",
@@ -324,7 +353,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         files.map(_.file),
         files.map(localizationPath),
         jobDescriptor,
-        files.map(_.file.womType).map(isOptionalInput), 
+        files.map(_.file.womType).map(areAllFilesOptional), 
         false
       )
     }
@@ -338,7 +367,8 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
             .get
           WomArray(WomArrayType(WomSingleFileType), files)
         }
-        val isOptional = isOptionalInput(womFile.womType)
+        // mixed optional is cast to mandatory
+        val isOptional = areAllFilesOptional(womFile.womType)
         // Flatten and collect files along with the outer womFile's optional status
         arrays.flatMap(_.value).collect { case file: WomFile =>
           (file, isOptional)
@@ -413,14 +443,11 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   ): Set[AwsBatchFileOutput] = {
     import cats.syntax.validated._
 
-    def isOptionalOutput(output: OutputDefinition): Boolean = {
-      output.womType match {
-        case WomOptionalType(_) => true
-        case _ => false
-      }
-    }
 
     def evaluateFiles(output: OutputDefinition): List[(WomFile, Boolean)] = {
+      // mixed mandatory/optional types are cast to mandatory.
+      val is_optional = areAllFilesOptional(output.womType)
+
       Try(
         output.expression
           .evaluateFiles(
@@ -429,8 +456,8 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
             output.womType
           )
           .map(_.toList map { womFile => 
-            // Pair each WomFile with its optional status
-            (womFile.file, isOptionalOutput(output)) 
+            // Pair each WomFile with the optional status
+            (womFile.file, is_optional) 
           })
       ).getOrElse(List.empty[(WomFile, Boolean)].validNel)
        .getOrElse(List.empty)
@@ -446,15 +473,17 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     val flatmapped = womFileOutputs.distinct flatMap {
       case (file, isOptional) => file.flattenFiles.map((_, isOptional))
     }
-
     // Generate AwsBatchFileOutput for each file based on type
     val outputs: Seq[AwsBatchFileOutput] = flatmapped flatMap {
+      
       case (unlistedDirectory: WomUnlistedDirectory, _) =>
         generateUnlistedDirectoryOutputs(unlistedDirectory)
       case (singleFile: WomSingleFile, isOptional) =>
         jobLogger.debug(s" file output: ${singleFile.value} of type ${singleFile.womType} -- optional : $isOptional")
         generateAwsBatchSingleFileOutputs(singleFile, isOptional)
-      case (globFile: WomGlobFile, _) => generateAwsBatchGlobFileOutputs(globFile)
+      case (globFile: WomGlobFile, _) => 
+        jobLogger.info(s"${globFile} : is glob file")
+        generateAwsBatchGlobFileOutputs(globFile)
     }
 
     val additionalGlobOutput =
@@ -610,15 +639,6 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     case AWSBatchStorageSystems.s3 => AwsBatchWorkingDisk.MountPoint
     case _ => jobPaths.callExecutionRoot
   }
-
-  // comment this, as it doesn't provide any data.
-  //  (original) def scriptPreamble: ErrorOr[ScriptPreambleData] = ScriptPreambleData("").valid
-  // override def scriptPreamble: String = {
-  //   configuration.fileSystem match {
-  //     case  AWSBatchStorageSystems.s3 => ""
-  //     case _ => ""
-  //   }
-  // }
 
   override def scriptClosure: String = {
     configuration.fileSystem match {
