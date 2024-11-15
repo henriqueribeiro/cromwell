@@ -258,7 +258,6 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   private def areAllFilesOptional(womType: WomType): Boolean = {
     def innerAreAllFileTypesInWomTypeOptional(womType: WomType): Boolean = womType match {
       case WomOptionalType(_: WomPrimitiveFileType) => 
-          println(s"cast ${womType} as optional (case 1)")
           true
       case _: WomPrimitiveFileType => 
           false

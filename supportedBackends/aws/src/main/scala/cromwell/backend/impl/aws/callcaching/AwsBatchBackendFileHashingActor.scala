@@ -90,7 +90,6 @@ class AwsBatchBackendFileHashingActor(standardParams: StandardFileHashingActorPa
     // At the outermost level, primitives are never optional.
     womType match {
       case _: WomPrimitiveType => 
-          println(s"cast ${womType} as mandatory (case 4)")  
           false
       case _ => innerAreAllFileTypesInWomTypeOptional(womType)
     }
