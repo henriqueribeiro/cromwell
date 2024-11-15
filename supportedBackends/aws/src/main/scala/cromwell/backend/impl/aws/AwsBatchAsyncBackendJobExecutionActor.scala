@@ -475,10 +475,8 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       case (unlistedDirectory: WomUnlistedDirectory, _) =>
         generateUnlistedDirectoryOutputs(unlistedDirectory)
       case (singleFile: WomSingleFile, isOptional) =>
-        jobLogger.debug(s" file output: ${singleFile.value} of type ${singleFile.womType} -- optional : $isOptional")
         generateAwsBatchSingleFileOutputs(singleFile, isOptional)
       case (globFile: WomGlobFile, _) => 
-        jobLogger.info(s"${globFile} : is glob file")
         generateAwsBatchGlobFileOutputs(globFile)
     }
 
