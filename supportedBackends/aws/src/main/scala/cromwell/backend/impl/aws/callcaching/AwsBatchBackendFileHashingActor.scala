@@ -151,7 +151,7 @@ class AwsBatchBackendFileHashingActor(standardParams: StandardFileHashingActorPa
         } else if (md5.exists && md5.lastModifiedTime.isBefore(file.lastModifiedTime)) {
             // sibling file is outdated, return invalid (random) string as md5
             Log.debug("Found outdated sibling file for " + file.toString)
-            Some(mRandom.alphanumeric.take(32).mkString.md5Sum).map(str => Try(str))
+            Some(Random.alphanumeric.take(32).mkString.md5Sum).map(str => Try(str))
         } else {
             // File present, but no sibling found, fall back to default.
             Log.debug("Found no sibling file for " + file.toString)
