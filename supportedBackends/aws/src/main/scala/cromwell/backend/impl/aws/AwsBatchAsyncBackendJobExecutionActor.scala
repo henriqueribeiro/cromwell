@@ -66,6 +66,8 @@ import cromwell.filesystems.s3.S3Path
 import cromwell.filesystems.s3.batch.S3BatchCommandBuilder
 
 import cromwell.services.keyvalue.KvClient
+import cromwell.services.metadata.CallMetadataKeys
+
 
 import org.slf4j.{Logger, LoggerFactory}
 import software.amazon.awssdk.services.batch.BatchClient
@@ -979,12 +981,22 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   override lazy val startMetadataKeyValues: Map[String, Any] =
     super[AwsBatchJobCachingActorHelper].startMetadataKeyValues
 
-  // opportunity to send custom metadata when the run is in a terminal state, currently we don't
-  override def getTerminalMetadata(runStatus: RunStatus): Map[String, Any] =
+  // opportunity to send custom metadata when the run is in a terminal state, currently related to cloudwatch info
+  def getTerminalMetadata(runStatus: RunStatus, jobHandle: StandardAsyncPendingExecutionHandle): Map[String, Any] = {
+    // job details
+    val jobDetail = batchClient.describeJobs(DescribeJobsRequest.builder.jobs(jobHandle.pendingJob.jobId).build).jobs.get(0)
     runStatus match {
-      case _: TerminalRunStatus => Map()
+      case _: TerminalRunStatus =>
+        Map(
+          AwsBatchMetadataKeys.LogStreamName -> Option(jobDetail.container.logStreamName).getOrElse("unknown"),
+          AwsBatchMetadataKeys.LogGroupName -> Option(jobDetail.container.logConfiguration.options.get("awslogs-group")).getOrElse("unknown"),
+          //AwsBatchMetadataKeys.JobStatusReason -> Option(jobDetail.statusReason).getOrElse("unknown"),
+          // region is taken by splitting the ARN of the job queue (logging is always in same region I think)
+          AwsBatchMetadataKeys.LogStreamRegion -> Option(jobDetail.jobQueue.split(":")(3)).getOrElse("unknown"),
+        )
       case unknown => throw new RuntimeException(s"Attempt to get terminal metadata from non terminal status: $unknown")
     }
+  }
 
   def hostAbsoluteFilePath(jobPaths: JobPaths, pathString: String): Path = {
 
@@ -1040,6 +1052,33 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         case _ => value
       }
     )
+  }
+
+
+ 
+  override def handlePollSuccess(oldHandle: StandardAsyncPendingExecutionHandle,
+                        state: StandardAsyncRunState
+  ): Future[ExecutionHandle] = {
+    val previousState = oldHandle.previousState
+    if (!(previousState exists statusEquivalentTo(state))) {
+      // If this is the first time checking the status, we log the transition as '-' to 'currentStatus'. Otherwise just use
+      // the state names.
+      // This logging and metadata publishing assumes that StandardAsyncRunState subtypes `toString` nicely to state names.
+      val prevStatusName = previousState.map(_.toString).getOrElse("-")
+      jobLogger.info(s"Status change from $prevStatusName to $state")
+      tellMetadata(Map(CallMetadataKeys.BackendStatus -> state))
+    }
+
+    state match {
+      case _ if isTerminal(state) =>
+        val metadata = getTerminalMetadata(state, oldHandle)
+        tellMetadata(metadata)
+        handleExecutionResult(state, oldHandle)
+      case s =>
+        Future.successful(
+          oldHandle.copy(previousState = Option(s))
+        ) // Copy the current handle with updated previous status.
+    }
   }
 
   override def handleExecutionSuccess(runStatus: StandardAsyncRunState,
