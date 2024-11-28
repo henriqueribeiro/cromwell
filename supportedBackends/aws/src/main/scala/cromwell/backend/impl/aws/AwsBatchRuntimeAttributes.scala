@@ -49,7 +49,7 @@ import com.typesafe.config.{ConfigException, ConfigValueFactory}
 
 import scala.util.matching.Regex
 import org.slf4j.{Logger, LoggerFactory}
-import wom.RuntimeAttributesKeys.{GpuKey } // , sharedMemoryKey}
+import wom.RuntimeAttributesKeys.GpuKey
 
 import scala.util.{Failure, Success, Try}
 import scala.jdk.CollectionConverters._
@@ -96,6 +96,7 @@ case class AwsBatchRuntimeAttributes(cpu: Int Refined Positive,
                                      efsDelocalize: Boolean,
                                      efsMakeMD5 : Boolean,
                                      sharedMemorySize: MemorySize,
+                                     jobTimeout: Int,
                                      logGroupName: String,
                                      additionalTags: Map[String, String],
                                      fileSystem: String= "s3",
@@ -112,7 +113,7 @@ object AwsBatchRuntimeAttributes {
   val awsBatchEvaluateOnExitKey = "awsBatchEvaluateOnExit"
 
   val defaultSharedMemorySize = MemorySize(64, MemoryUnit.MB)
-
+  
   private val awsBatchEvaluateOnExitDefault = WomArray(WomArrayType(WomMapType(WomStringType,WomStringType)), Vector(WomMap(Map.empty[WomValue, WomValue])))
 
 
@@ -139,13 +140,15 @@ object AwsBatchRuntimeAttributes {
   private val additionalTagsKey = "additionalTags"
 
   val UlimitsKey = "ulimits"
+  private val jobTimeoutKey = "jobTimeout"
+
   private val UlimitsDefaultValue = WomArray(WomArrayType(WomMapType(WomStringType,WomStringType)), Vector(WomMap(Map.empty[WomValue, WomValue])))
 
   private def cpuValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Int Refined Positive] = CpuValidation.instance
     .withDefault(CpuValidation.configDefaultWomValue(runtimeConfig) getOrElse CpuValidation.defaultMin)
 
   private def gpuCountValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Int] = {
-    GpuCountValidation(GpuKey).withDefault(GpuCountValidation(GpuKey).configDefaultWomValue(runtimeConfig).getOrElse(WomInteger(0)))
+    PosIntValidation(GpuKey).withDefault(PosIntValidation(GpuKey).configDefaultWomValue(runtimeConfig).getOrElse(WomInteger(0)))
   }
 
   private def cpuMinValidation(runtimeConfig: Option[Config]):RuntimeAttributesValidation[Int Refined Positive] = CpuValidation.instanceMin
@@ -186,7 +189,10 @@ object AwsBatchRuntimeAttributes {
       MemoryValidation.configDefaultString(RuntimeAttributesKeys.sharedMemoryKey, runtimeConfig) getOrElse defaultSharedMemorySize.toString
     )
   }
-
+ 
+  private def jobTimeoutValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Int] = {
+    PosIntValidation(jobTimeoutKey, minValue = 60).withDefault(PosIntValidation(jobTimeoutKey, minValue = 60).configDefaultWomValue(runtimeConfig).getOrElse(WomInteger(0)))
+  }
   private def logGroupNameValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[String] = logGroupNameValidationInstance
     .withDefault(logGroupNameValidationInstance.configDefaultWomValue(runtimeConfig) getOrElse LogGroupNameDefaultValue)
 
@@ -278,6 +284,7 @@ object AwsBatchRuntimeAttributes {
                         awsBatchefsMakeMD5Validation(runtimeConfig),
                         awsBatchtagResourcesValidation(runtimeConfig),
                         sharedMemorySizeValidation(runtimeConfig),
+                        jobTimeoutValidation(runtimeConfig)
                       )
     def validationsLocalBackend  = StandardValidatedRuntimeAttributesBuilder.default(runtimeConfig).withValidation(
       cpuValidation(runtimeConfig),
@@ -298,6 +305,7 @@ object AwsBatchRuntimeAttributes {
       awsBatchefsMakeMD5Validation(runtimeConfig),
       awsBatchtagResourcesValidation(runtimeConfig),
       sharedMemorySizeValidation(runtimeConfig),
+      jobTimeoutValidation(runtimeConfig)
     )
 
     configuration.fileSystem match {
@@ -340,6 +348,7 @@ object AwsBatchRuntimeAttributes {
     val efsMakeMD5: Boolean = RuntimeAttributesValidation.extract(awsBatchefsMakeMD5Validation(runtimeAttrsConfig),validatedRuntimeAttributes)
     val tagResources: Boolean = RuntimeAttributesValidation.extract(awsBatchtagResourcesValidation(runtimeAttrsConfig),validatedRuntimeAttributes)
     val sharedMemorySize: MemorySize = RuntimeAttributesValidation.extract(sharedMemorySizeValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
+    val jobTimeout: Int = RuntimeAttributesValidation.extract(jobTimeoutValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
 
     new AwsBatchRuntimeAttributes(
       cpu,
@@ -359,6 +368,7 @@ object AwsBatchRuntimeAttributes {
       efsDelocalize,
       efsMakeMD5,
       sharedMemorySize,
+      jobTimeout,
       logGroupName,
       additionalTags,
       fileSystem,
@@ -536,17 +546,18 @@ object DisksValidation extends RuntimeAttributesValidation[Seq[AwsBatchVolume]] 
     s"Expecting $key runtime attribute to be a comma separated String or Array[String]"
 }
 
-object GpuCountValidation {
-  def apply(key: String): GpuCountValidation = new GpuCountValidation(key)
+object PosIntValidation {
+  def apply(key: String, minValue: Int = 0): PosIntValidation = new PosIntValidation(key, minValue)
 }
 
-class GpuCountValidation(key: String) extends IntRuntimeAttributesValidation(key) {
+class PosIntValidation(key: String, minValue: Int = 0) extends IntRuntimeAttributesValidation(key) {
   override protected def validateValue: PartialFunction[WomValue, ErrorOr[Int]] = {
     case womValue if WomIntegerType.coerceRawValue(womValue).isSuccess =>
       WomIntegerType.coerceRawValue(womValue).get match {
         case WomInteger(value) =>
-          if (value.toInt < 0)
-            s"Expecting $key runtime attribute value greater than or equal to 0".invalidNel
+          // allow the default value of zero.
+          if (value.toInt < minValue && value.toInt != 0)
+            s"Expecting $key runtime attribute value greater than or equal to $minValue".invalidNel
           else
             value.toInt.validNel
       }

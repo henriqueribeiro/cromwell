@@ -659,6 +659,10 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
             )
           submitJobRequest = submitJobRequest.tags(tags.asJava).propagateTags(true)
       }
+      // JobTimeout provided (positive value) : add to request
+      if (runtimeAttributes.jobTimeout > 0) {
+        submitJobRequest = submitJobRequest.timeout(JobTimeout.builder().attemptDurationSeconds(runtimeAttributes.jobTimeout).build())
+      }
       // submit
       val submit: F[SubmitJobResponse] =
         async.delay(batchClient.submitJob(

@@ -111,6 +111,7 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
 
   val cpu: Int Refined Positive = 2
   val sharedMemorySize: MemorySize = "64 MB"
+  val jobTimeout: Int = 3600
 
   val runtimeAttributes: AwsBatchRuntimeAttributes = new AwsBatchRuntimeAttributes(
       cpu = cpu,
@@ -131,6 +132,7 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
       efsMakeMD5 = false,
       fileSystem = "s3",
       sharedMemorySize = sharedMemorySize,
+      jobTimeout = jobTimeout,
       logGroupName = "/aws/batch/job",
       additionalTags = Map("tag" -> "value")
   )
@@ -511,3 +513,5 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
     val expected = LinuxParameters.builder().sharedMemorySize(100).build()
     expected should equal(actual)
   }
+
+  // ADD TEST FOR jobTimout

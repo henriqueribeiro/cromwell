@@ -165,8 +165,9 @@ trait AwsBatchJobDefinitionBuilder {
       efsMakeMD5: Boolean,
       tagResources: Boolean,
       logGroupName: String,
-      sharedMemorySize: MemorySize): String = {
-        s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}:${tagResources.toString}:$logGroupName:${sharedMemorySize.to(MemoryUnit.MB).amount.toInt}"
+      sharedMemorySize: MemorySize,
+      jobTimeout: Int): String = {
+        s"$imageName:$packedCommand:${volumes.map(_.toString).mkString(",")}:${mountPoints.map(_.toString).mkString(",")}:${env.map(_.toString).mkString(",")}:${ulimits.map(_.toString).mkString(",")}:${efsDelocalize.toString}:${efsMakeMD5.toString}:${tagResources.toString}:$logGroupName:${sharedMemorySize.to(MemoryUnit.MB).amount.toInt}:${jobTimeout}"
       }
 
     val environment = List.empty[KeyValuePair]
@@ -202,7 +203,8 @@ trait AwsBatchJobDefinitionBuilder {
       efsMakeMD5,
       tagResources,
       logGroupName,
-      context.runtimeAttributes.sharedMemorySize
+      context.runtimeAttributes.sharedMemorySize,
+      context.runtimeAttributes.jobTimeout
     )
     // To reuse job definition for gpu and gpu-runs, we will create a job definition that does not gpu requirements
     // since aws batch does not allow you to set gpu as 0 when you dont need it. you will always need cpu and memory
