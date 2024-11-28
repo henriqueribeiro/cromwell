@@ -210,6 +210,26 @@ task gpu_queue_task {
 }
 ```
 
+### Job TimeOut Support
+
+Cromwell supports the [AWS Batch jobTimeout](https://docs.aws.amazon.com/batch/latest/userguide/job_timeouts.html) parameter. This allows to automatically terminate jobs that have been running for more than the specified (expected) timeout. The timeout is specified in seconds. Timeout can be specified as a default for the workflow or per task. Values under 60s are not allowed by AWS and ignored in cromwell. 
+
+default runtime attribute: 
+```
+{
+  "default_runtime_attributes": {
+    "jobTimeout" : 3600
+  }
+}
+```
+
+task runtime attribute: 
+```
+runtime {
+  jobTimeout: 3600
+}
+```
+
 
 
 ### Call Caching with ECR private
