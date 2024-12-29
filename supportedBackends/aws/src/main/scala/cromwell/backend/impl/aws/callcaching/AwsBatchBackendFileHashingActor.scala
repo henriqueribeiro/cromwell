@@ -125,39 +125,40 @@ class AwsBatchBackendFileHashingActor(standardParams: StandardFileHashingActorPa
         }
     }.toMap
     
-    Log.debug(s"Hashing file : ${file.toString}")
+    println(s"Hashing file : ${file.toString}")
     
     // optional files are allowed to be missing
     if (callInputFiles.contains(fileRequest.file.toString) && callInputFiles(fileRequest.file.toString) && ! file.exists) {
         // return hash of empty string
-        Log.debug(s"Optional File Missing: ${file.toString}. Return hash of empty string")
+        println(s"Optional File Missing: ${file.toString}. Return hash of empty string")
         Some("".md5Sum).map(str => Try(str))
-        // Some("File Missing").map(str => Try(str))
-    } else if (aws_config.efsMntPoint.isDefined && file.toString.startsWith(aws_config.efsMntPoint.getOrElse("--")) && aws_config.checkSiblingMd5.getOrElse(false)) {
+    // the file is an efs file and sibling md5 is enabled
+    } else if (file.toString.startsWith(aws_config.efsMntPoint.getOrElse("--")) && aws_config.checkSiblingMd5.getOrElse(false)) {
         val md5 = file.sibling(s"${file.toString}.md5")
         // check existance of the main file : 
         if (!file.exists) {
             // cache hit is invalid; return invalid (random) md5 
-            Log.debug(s"Non Optional File Missing: ${file.toString}")
+            println(s"Non Optional File Missing: ${file.toString}")
             Some(Random.alphanumeric.take(32).mkString.md5Sum).map(str => Try(str))
         }
         // check existence of the sibling file and make sure it's newer than main file
         else if (md5.exists && md5.lastModifiedTime.isAfter(file.lastModifiedTime)) {
             // read the file.
-            Log.debug("Found valid sibling file for " + file.toString)
+            println("Found valid sibling file for " + file.toString)
             val md5_value: Option[String] = Some(md5.contentAsString.split("\\s+")(0))
             md5_value.map(str => Try(str))
         } else if (md5.exists && md5.lastModifiedTime.isBefore(file.lastModifiedTime)) {
             // sibling file is outdated, return invalid (random) string as md5
-            Log.debug("Found outdated sibling file for " + file.toString)
+            println("Found outdated sibling file for " + file.toString)
             Some(Random.alphanumeric.take(32).mkString.md5Sum).map(str => Try(str))
         } else {
             // File present, but no sibling found, fall back to default.
-            Log.debug("Found no sibling file for " + file.toString)
+            println("Found no sibling file for " + file.toString)
             None
         }
     } else {
-        // Detected existing non-EFS file: return None
+        // non-efs file or sibling md5 is disabled : fall back to default
+        println(s"non-efs file or sibling md5 is disabled for : ${file.toString}")
         None  
     }
   }

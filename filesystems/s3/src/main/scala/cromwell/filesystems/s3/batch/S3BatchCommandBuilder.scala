@@ -37,7 +37,7 @@ import cromwell.filesystems.s3.S3Path
 import org.slf4j.{Logger, LoggerFactory}
 import cromwell.core.io.DefaultIoCommand.DefaultIoHashCommand
 
-import scala.util.Try
+import scala.util.{Try}
 
 /**
   * Generates commands for IO operations on S3
@@ -84,16 +84,23 @@ private case object PartialS3BatchCommandBuilder extends PartialIoCommandBuilder
   }
 
   override def touchCommand: PartialFunction[Path, Try[S3BatchTouchCommand]] = { case path: S3Path =>
+    println(s"Touching $path")
     Try(S3BatchTouchCommand(path))
   }
 
   override def existsCommand: PartialFunction[Path, Try[S3BatchExistsCommand]] = { case path: S3Path =>
+    println(s"Checking existence of $path")
     Try(S3BatchExistsCommand(path))
   }
   
   override def existsOrThrowCommand: PartialFunction[Path, Try[S3BatchExistsOrThrowCommand]] = { case path: S3Path =>
     Try(S3BatchExistsOrThrowCommand(path))
   }
+  
+  override def noopCommand: PartialFunction[Path, Try[S3BatchNoopCommand]] = { case path: S3Path =>
+    Try(S3BatchNoopCommand(path))
+  }
+ 
 }
 
 /**
