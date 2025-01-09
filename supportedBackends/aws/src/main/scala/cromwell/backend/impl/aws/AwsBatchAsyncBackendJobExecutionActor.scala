@@ -931,44 +931,52 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
        Log.info(s"No attempts were made for job '${job.jobId}'. no memory-related retry needed.")
        false
      }
-     var containerRC =
-         try {
-             lastattempt.container.exitCode
-         } catch {
-             case _ : Throwable => null
-         }
-     // if missing, set to failed.
-     if (containerRC == null ) {
-         Log.debug(s"No RC found for job '${job.jobId}', most likely a spot kill")
-         containerRC = 1
-     }
-     // if not zero => get reason, else set retry to false.
-     containerRC.toString() match {
-       case "0" =>
-           Log.debug("container exit code was zero. job succeeded")
-           false
-       case "137" => 
-           Log.info("Job failed with Container status reason : 'OutOfMemory' (code:137)")
-           true
-       case _ => 
-           // failed job due to command errors (~ user errors) don't have a container exit reason.
-           val containerStatusReason:String = {
-              var lastReason =  lastattempt.container.reason
-              // cast null to empty-string to prevent nullpointer exception.
-              if (lastReason == null || lastReason.isEmpty) {
-                  lastReason = ""
-                  log.debug("No exit reason found for container.")
-              } else {
-                  Log.warn(s"Job failed with Container status reason : '${lastReason}'")
+     else {
+        var containerRC =
+            try {
+                lastattempt.container.exitCode
+            } catch {
+                case _ : Throwable => null
+            }
+        // if missing, set to failed.
+        if (containerRC == null ) {
+            Log.debug(s"No RC found for job '${job.jobId}', most likely a spot kill")
+            containerRC = 1
+        }
+        // if not zero => get reason, else set retry to false.
+        containerRC.toString() match {
+          case "0" =>
+              Log.debug("container exit code was zero. job succeeded")
+              false
+          case "137" => 
+              Log.info("Job failed with Container status reason : 'OutOfMemory' (code:137)")
+              true
+          case _ => 
+              // failed job due to command errors (~ user errors) don't have a container exit reason.
+              val containerStatusReason:String = {
+                 // if no attempts were made (rare) : container is null:
+                 var lastReason = try {
+                     lastattempt.container.reason
+                 } catch {
+                     case _ : Throwable => null
+                 }
+   
+                 // cast null to empty-string to prevent nullpointer exception.
+                 if (lastReason == null || lastReason.isEmpty) {
+                     lastReason = ""
+                     log.debug("No exit reason found for container.")
+                 } else {
+                     Log.warn(s"Job failed with Container status reason : '${lastReason}'")
+                 }
+                 lastReason
               }
-              lastReason
-           }
-           // check the list of OOM-keys against the exit reason.
-           val RetryMemoryKeys = memoryRetryErrorKeys.toList.flatten
-           val retry = RetryMemoryKeys.exists(containerStatusReason.contains)
-           Log.debug(s"Retry job based on provided keys : '${retry}'")
-           retry
-     }  
+              // check the list of OOM-keys against the exit reason.
+              val RetryMemoryKeys = memoryRetryErrorKeys.toList.flatten
+              val retry = RetryMemoryKeys.exists(containerStatusReason.contains)
+              Log.debug(s"Retry job based on provided keys : '${retry}'")
+              retry
+        }  
+     }
   }
 
   

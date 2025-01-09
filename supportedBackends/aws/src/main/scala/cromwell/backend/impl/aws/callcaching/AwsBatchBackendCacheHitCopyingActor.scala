@@ -202,13 +202,19 @@ class AwsBatchBackendCacheHitCopyingActor(standardParams: StandardCacheHitCopyin
                 }
               } 
               // on s3 : copy (mandatory) or copy if exists (optional)
-              else {// on efs : source == destination
+              else {
                 val destinationPath = PathCopier.getDestinationFilePath(sourceCallRootPath, sourcePath, destinationCallRootPath)
                 val destinationSimpleton = WomValueSimpleton(key, WomSingleFile(destinationPath.pathAsString))
 
                 // optional
                 if (is_optional(wdlFile.value,womFileMap)) {
-                  Try(destinationSimpleton -> S3BatchCommandBuilder.noopCommand(destinationPath).get)
+                  val fileExists = sourcePath.exists
+                  if (fileExists) {
+                    Try(destinationSimpleton -> S3BatchCommandBuilder.copyCommand(sourcePath, destinationPath).get)
+                  } else {
+                    Try(destinationSimpleton -> S3BatchCommandBuilder.noopCommand(destinationPath).get)
+                  }
+                  
                 // mandatory
                 } else {
                   Try(destinationSimpleton -> S3BatchCommandBuilder.copyCommand(sourcePath, destinationPath).get)
