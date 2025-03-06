@@ -22,6 +22,7 @@ object RuntimeAttributesKeys {
   val MemoryMinKey = "memoryMin"
   val MemoryMaxKey = "memoryMax"
   val sharedMemoryKey = "sharedMemorySize"
+  val fuseMountKey = "fuseMount"
   val jobTimeoutKey = "jobTimeout"
   
   val TmpDirMinKey = "tmpDirMin"

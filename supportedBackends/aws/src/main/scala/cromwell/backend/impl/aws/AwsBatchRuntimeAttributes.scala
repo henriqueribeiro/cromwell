@@ -99,6 +99,7 @@ case class AwsBatchRuntimeAttributes(cpu: Int Refined Positive,
                                      jobTimeout: Int,
                                      logGroupName: String,
                                      additionalTags: Map[String, String],
+                                     fuseMount: Boolean,
                                      fileSystem: String= "s3",
                                      tagResources: Boolean = false)
 
@@ -113,7 +114,7 @@ object AwsBatchRuntimeAttributes {
   val awsBatchEvaluateOnExitKey = "awsBatchEvaluateOnExit"
 
   val defaultSharedMemorySize = MemorySize(64, MemoryUnit.MB)
-  
+   
   private val awsBatchEvaluateOnExitDefault = WomArray(WomArrayType(WomMapType(WomStringType,WomStringType)), Vector(WomMap(Map.empty[WomValue, WomValue])))
 
 
@@ -141,6 +142,10 @@ object AwsBatchRuntimeAttributes {
 
   val UlimitsKey = "ulimits"
   private val jobTimeoutKey = "jobTimeout"
+
+  val fuseMountKey = "fuseMount"
+  private val fuseMountValidationInstance = new BooleanRuntimeAttributesValidation(fuseMountKey)
+  private val fuseMountDefaultValue = WomBoolean(false)
 
   private val UlimitsDefaultValue = WomArray(WomArrayType(WomMapType(WomStringType,WomStringType)), Vector(WomMap(Map.empty[WomValue, WomValue])))
 
@@ -190,6 +195,10 @@ object AwsBatchRuntimeAttributes {
     )
   }
  
+  private def fuseMountValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Boolean] = {
+    fuseMountValidationInstance.withDefault(fuseMountValidationInstance.configDefaultWomValue(runtimeConfig) getOrElse fuseMountDefaultValue)
+  }
+  
   private def jobTimeoutValidation(runtimeConfig: Option[Config]): RuntimeAttributesValidation[Int] = {
     PosIntValidation(jobTimeoutKey, minValue = 60).withDefault(PosIntValidation(jobTimeoutKey, minValue = 60).configDefaultWomValue(runtimeConfig).getOrElse(WomInteger(0)))
   }
@@ -284,6 +293,7 @@ object AwsBatchRuntimeAttributes {
                         awsBatchefsMakeMD5Validation(runtimeConfig),
                         awsBatchtagResourcesValidation(runtimeConfig),
                         sharedMemorySizeValidation(runtimeConfig),
+                        fuseMountValidation(runtimeConfig),
                         jobTimeoutValidation(runtimeConfig)
                       )
     def validationsLocalBackend  = StandardValidatedRuntimeAttributesBuilder.default(runtimeConfig).withValidation(
@@ -305,6 +315,7 @@ object AwsBatchRuntimeAttributes {
       awsBatchefsMakeMD5Validation(runtimeConfig),
       awsBatchtagResourcesValidation(runtimeConfig),
       sharedMemorySizeValidation(runtimeConfig),
+      fuseMountValidation(runtimeConfig),
       jobTimeoutValidation(runtimeConfig)
     )
 
@@ -349,6 +360,7 @@ object AwsBatchRuntimeAttributes {
     val tagResources: Boolean = RuntimeAttributesValidation.extract(awsBatchtagResourcesValidation(runtimeAttrsConfig),validatedRuntimeAttributes)
     val sharedMemorySize: MemorySize = RuntimeAttributesValidation.extract(sharedMemorySizeValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
     val jobTimeout: Int = RuntimeAttributesValidation.extract(jobTimeoutValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
+    val fuseMount: Boolean = RuntimeAttributesValidation.extract(fuseMountValidation(runtimeAttrsConfig), validatedRuntimeAttributes)
 
     new AwsBatchRuntimeAttributes(
       cpu,
@@ -371,6 +383,7 @@ object AwsBatchRuntimeAttributes {
       jobTimeout,
       logGroupName,
       additionalTags,
+      fuseMount,
       fileSystem,
       tagResources
     )

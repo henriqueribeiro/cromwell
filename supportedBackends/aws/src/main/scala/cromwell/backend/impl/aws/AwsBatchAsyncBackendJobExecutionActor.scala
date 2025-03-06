@@ -74,6 +74,8 @@ import software.amazon.awssdk.services.batch.BatchClient
 import software.amazon.awssdk.services.batch.model._
 
 import wom.callable.Callable.OutputDefinition
+import wom.callable.MetaValueElement.{MetaValueElementBoolean, MetaValueElementObject}
+
 import wom.core.FullyQualifiedName
 import wom.expression.NoIoFunctionSet
 import wom.types.{WomArrayType, 
@@ -156,6 +158,17 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
 
   // |cd ${jobPaths.script.parent.pathWithoutScheme}; ls | grep -v script | xargs rm -rf; cd -
 
+
+  override def inputsToNotLocalize: Set[WomFile] = {
+      jobDescriptor.fullyQualifiedInputs.collect {
+        case (_, womFile: WomFile) if jobDescriptor.findInputFilesByParameterMeta {
+          case MetaValueElementObject(values) => 
+              values.get("localization_optional").contains(MetaValueElementBoolean(true))
+          case _ => false
+        }.contains(womFile) => womFile
+      }.toSet
+    }
+
   private lazy val execScript =
     s"""|#!$jobShell
         |find ${jobPaths.script.parent.pathWithoutScheme} -group root | grep -v script | xargs rm -vrf
@@ -203,6 +216,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     case AWSBatchStorageSystems.s3 => commandScriptContents.toEither.toOption.get
     case _ => execScript
   }
+  
 
   lazy val batchJob: AwsBatchJob = {
     AwsBatchJob(
@@ -285,26 +299,31 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       namePrefix: String,
       remotePathArray: Seq[WomFile],
       localPathArray: Seq[WomFile],
-      jobDescriptor: BackendJobDescriptor,
-      isOptional: Seq[Boolean],  // New parameter
-      flag: Boolean
+      isOptional: Seq[Boolean],  // can file be missing (File?)
+      isLocOptional: Seq[Boolean] // can localization be skipped (through meta tags)
   ): Iterable[AwsBatchInput] = {
 
-    (remotePathArray zip localPathArray zip isOptional zipWithIndex) flatMap {
-      case (((remotePath, localPath), optional), index) =>
+    (remotePathArray zip localPathArray zip isOptional zip isLocOptional zipWithIndex) flatMap {
+      case ((((remotePath, localPath), optional), locOptional), index) =>
         var localPathString = localPath.valueString
-        if (localPathString.startsWith("s3://")) {
+        // not localizing : keep remote path
+        if (locOptional) {
+          localPathString = remotePath.valueString
+        // localizing : strip s3 prefixes
+        } else if (localPathString.startsWith("s3://")) {
           localPathString = localPathString.replace("s3://", "")
         } else if (localPathString.startsWith("s3:/")) {
           localPathString = localPathString.replace("s3:/", "")
         }
+        val localBuiltPath = DefaultPathBuilder.get(localPathString)
         Seq(
           AwsBatchFileInput(
             s"$namePrefix-$index",
             remotePath.valueString,
-            DefaultPathBuilder.get(localPathString),
+            localBuiltPath,
             workingDisk,
-            optional
+            optional,
+            locOptional
           )
         )
     }
@@ -350,15 +369,19 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         name,
         files.map(_.file),
         files.map(localizationPath),
-        jobDescriptor,
-        files.map(_.file.womType).map(areAllFilesOptional), 
-        false
+        Seq.fill(files.size)(false), // Add Seq() of false for each file (isOptional)
+        Seq.fill(files.size)(false) // Add Seq() of false for each file (locOptional)
       )
     }
 
-    val callInputFiles: Map[FullyQualifiedName, Seq[(WomFile, Boolean)]] = jobDescriptor.fullyQualifiedInputs safeMapValues {
-      womFile =>
-        val arrays: Seq[WomArray] = womFile collectAsSeq { case womFile: WomFile =>
+    
+
+    
+    val callInputFiles: Map[FullyQualifiedName, Seq[(WomFile, Boolean, Boolean)]] = jobDescriptor.fullyQualifiedInputs safeMapValues {
+      case womFile: WomFile => // womFile =>
+        // we can skip optional_localization files here, but that prevents checking in the call script for existence.
+        //   => pass on all input files, check optional_localization during the actual localization. 
+        val arrays: Seq[WomArray] = womFile collectAsSeq { case womFile: WomFile  =>
           val files: List[WomSingleFile] = DirectoryFunctions
             .listWomSingleFiles(womFile, callPaths.workflowPaths)
             .toTry(s"Error getting single files for $womFile")
@@ -367,22 +390,26 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         }
         // mixed optional is cast to mandatory
         val isOptional = areAllFilesOptional(womFile.womType)
-        // Flatten and collect files along with the outer womFile's optional status
+        // optional localization set ? 
+        val isLocOptional = inputsToNotLocalize.contains(womFile)
+          
+        // Flatten and collect files along with the outer womFile's optional status and localization requirement
         arrays.flatMap(_.value).collect { case file: WomFile =>
-          (file, isOptional)
+          (file, isOptional, isLocOptional)
         }
     }
-
+    
     val callInputInputs = callInputFiles flatMap { case (name, filesWithOptional) =>
       val files = filesWithOptional.map(_._1)            // Extract the WomFiles
-      val isOptional = filesWithOptional.map(_._2)         // Extract the corresponding WomTypes
+      val isOptional = filesWithOptional.map(_._2)         // Extract the corresponding optional status
+      val isLocOptional = filesWithOptional.map(_._3) // Extract the corresponding localization status
+
       inputsFromWomFiles(
         name,
         files,
         files.map(relativeLocalizationPath),
-        jobDescriptor,
-        isOptional,                                     // Pass womTypes to inputsFromWomFiles
-        true
+        isOptional,                                     // Pass optional status 
+        isLocOptional                                  // Pass localization requirement
       )
     }
     // this is a list : AwsBatchInput(name_in_wf, origin_such_as_s3, target_in_docker_relative, target_in_docker_disk[name mount], is_optional_file )
@@ -391,6 +418,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       jobPaths.script.pathAsString,
       DefaultPathBuilder.get(jobPaths.script.pathWithoutScheme),
       workingDisk,
+      false,
       false
     )
 

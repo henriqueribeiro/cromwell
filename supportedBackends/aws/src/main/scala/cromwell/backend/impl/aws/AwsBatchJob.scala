@@ -142,16 +142,14 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
            |_s3_localize_with_retry "${input.s3key}" "$workDir/${input.local}"
            |sed -i 's#${AwsBatchWorkingDisk.MountPoint.pathAsString}#$workDir#g' "$workDir/${input.local}"
            |""".stripMargin
-
-      case input: AwsBatchFileInput if input.s3key.startsWith("s3://") =>
-        // regular s3 objects : download to working dir.
-        s"""_s3_localize_with_retry "${input.s3key}" "${input.mount.mountPoint.pathAsString}/${input.local}" "${input.optional}" """.stripMargin
-          .replace(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
+      // s3 files : isOptional and locOptional are handled in localization script.
+      case input: AwsBatchFileInput if input.s3key.startsWith("s3://")  =>
+          s"""_s3_localize_with_retry "${input.s3key}" "${input.mount.mountPoint.pathAsString}/${input.local}" "${input.optional}" "${input.locOptional}" """.stripMargin
+            .replace(AwsBatchWorkingDisk.MountPoint.pathAsString, workDir)
 
       case input: AwsBatchFileInput if efsMntPoint.isDefined && input.s3key.startsWith(efsMntPoint.get) =>
         // EFS located file : test for presence on provided path.
         Log.debug("EFS input file detected: "+ input.s3key + " / "+ input.local.pathAsString)
-        //s"""test -e "${input.s3key}" || (echo 'input file: ${input.s3key} does not exist' && LOCALIZATION_FAILED=1)""".stripMargin
         s"""_check_efs_infile "${input.s3key}" "${input.optional}" """.stripMargin
 
       case input: AwsBatchFileInput =>
@@ -193,8 +191,10 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |  local s3_path="$$1"
          |  # destination must be the path to a file and not just the directory you want the file in
          |  local destination="$$2"
-         |  # if third options is specified, it is the optional tag (true / false)
+         |  # if third option is specified, it is the optional tag (true / false)
          |  local is_optional="$${3:-false}"
+         |  # if fourth option is specified, it is the locOptional tag (true / false)
+         |  local loc_optional="$${4:-false}"
          |
          |  for i in {1..6};
          |  do
@@ -219,6 +219,11 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |        LOCALIZATION_FAILED=1
          |      fi
          |      return
+         |    fi
+         |    # if localization is optional : skip
+         |    if [[ "$$loc_optional" == "true" ]]; then
+         |       echo "File $$s3_path does not have to be localized. Skipping localization"
+         |       return 
          |    fi
          |    # copy
          |    $awsCmd s3 cp --no-progress "$$s3_path" "$$destination"  ||
@@ -332,7 +337,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |      LOCALIZATION_FAILED=1
          |  fi
          |}
-         |  
+         |
          |function _get_multipart_chunk_size() {
          |  local file_path="$$1"
          |  # missing files : skip.
@@ -362,7 +367,7 @@ final case class AwsBatchJob(jobDescriptor: BackendJobDescriptor, // WDL/CWL
          |  else
          |      # this is already checked in the caller function
          |      echo "$$s3_path is not an S3 path with a bucket and key."
-         |      exit 1
+         |      return 1
          |  fi
          |  s3_content_length=$$($awsCmd s3api head-object --bucket "$$bucket" --key "$$key" --query 'ContentLength') ||
          |        { echo "Attempt to get head of object failed for $$s3_path." && return 1; }
