@@ -374,9 +374,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       )
     }
 
-    
 
-    
     val callInputFiles: Map[FullyQualifiedName, Seq[(WomFile, Boolean, Boolean)]] = jobDescriptor.fullyQualifiedInputs safeMapValues {
       case womFile: WomFile => // womFile =>
         // we can skip optional_localization files here, but that prevents checking in the call script for existence.
@@ -397,8 +395,10 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         arrays.flatMap(_.value).collect { case file: WomFile =>
           (file, isOptional, isLocOptional)
         }
+      // non-file inputs are skipped
+      case _ => Seq.empty
     }
-    
+
     val callInputInputs = callInputFiles flatMap { case (name, filesWithOptional) =>
       val files = filesWithOptional.map(_._1)            // Extract the WomFiles
       val isOptional = filesWithOptional.map(_._2)         // Extract the corresponding optional status
@@ -587,9 +587,16 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     // add workflow id to hash for better conflict prevention
     val wfid = standardParams.jobDescriptor.toString.split(":")(0)
     val globName = GlobFunctions.globName(s"${womFile.value}-${wfid}")
-    var globbedDirPath = Paths.get(womFile.value).getParent()
+    
+    var globbedDirPath = Paths.get(womFile.value).getParent() match {
+      case null => Paths.get(".")
+      case parent => parent
+    }
     while (globbedDirPath.toString().contains("*")) {
-      globbedDirPath = globbedDirPath.getParent()
+      globbedDirPath = globbedDirPath.getParent() match {
+        case null => Paths.get(".")
+        case parent => parent
+      }
     }
     val globbedDir: String = globbedDirPath.toString()
     // generalize folder and list file
@@ -613,15 +620,16 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         // cannot resolve absolute paths : strip the leading '/'
         (
           callRootPath
-            .resolve(globDirectory.toString.stripPrefix("/"))
+            // first strip './' (glob in working dir), then '/' (relative path)
+            .resolve(globDirectory.toString.stripPrefix("./").stripPrefix("/"))
             .pathAsString,
           callRootPath
-            .resolve(globListFile.toString.stripPrefix("/"))
+            .resolve(globListFile.toString.stripPrefix("./").stripPrefix("/"))
             .pathAsString
         )
       }
     // return results
-    return (
+    (
         globName,
         globbedDir,
         globDirectoryDisk,
@@ -633,7 +641,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
 
   // used by generateAwsBatchOutputs, could potentially move this def within that function
   private def generateAwsBatchGlobFileOutputs(womFile: WomGlobFile): List[AwsBatchFileOutput] = {
-
+    
     val (globName, globbedDir, globDirectoryDisk, globDirectoryDestinationPath, globListFileDestinationPath) = generateGlobPaths(womFile)
     val (relpathDir,_) = relativePathAndVolume(DefaultPathBuilder.get(globbedDir + "/." + globName + "/" + "*").toString,runtimeAttributes.disks)
     val (relpathList,_) = relativePathAndVolume(DefaultPathBuilder.get(globbedDir + "/." + globName + ".list").toString,runtimeAttributes.disks)
