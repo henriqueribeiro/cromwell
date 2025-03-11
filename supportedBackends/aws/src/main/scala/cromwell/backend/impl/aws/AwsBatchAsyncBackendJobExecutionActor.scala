@@ -399,7 +399,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
               .toTry(s"Error getting single files for $womFile")
               .get
             WomArray(WomArrayType(WomSingleFileType), files)
-          case other => 
+          case _ => 
             WomArray(WomArrayType(WomSingleFileType), List.empty)
         }
         // if files found: define optional statuses
