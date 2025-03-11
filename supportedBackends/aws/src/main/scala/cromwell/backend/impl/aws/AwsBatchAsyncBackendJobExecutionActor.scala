@@ -158,7 +158,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
 
   // |cd ${jobPaths.script.parent.pathWithoutScheme}; ls | grep -v script | xargs rm -rf; cd -
 
-
+  // overriden function : used in StandardAsyncExecutionActor
   override def inputsToNotLocalize: Set[WomFile] = {
       jobDescriptor.fullyQualifiedInputs.collect {
         case (_, womFile: WomFile) if jobDescriptor.findInputFilesByParameterMeta {
@@ -166,8 +166,20 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
               values.get("localization_optional").contains(MetaValueElementBoolean(true))
           case _ => false
         }.contains(womFile) => womFile
+        
       }.toSet
     }
+  // custom routine that simply returns a boolean. Used here in callInputFiles
+  private def isLocalizationOptional: WomValue => Boolean = {
+    jobDescriptor.fullyQualifiedInputs.collect {
+        case (_, womFile: WomFile) if jobDescriptor.findInputFilesByParameterMeta {
+          case MetaValueElementObject(values) => 
+              values.get("localization_optional").contains(MetaValueElementBoolean(true))
+          case _ => false
+        }.contains(womFile) => womFile
+        
+      }.toSet
+  }
 
   private lazy val execScript =
     s"""|#!$jobShell
@@ -374,31 +386,39 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       )
     }
 
-
+    
     val callInputFiles: Map[FullyQualifiedName, Seq[(WomFile, Boolean, Boolean)]] = jobDescriptor.fullyQualifiedInputs safeMapValues {
-      case womFile: WomFile => // womFile =>
+      // consider womfiles, optional womfiles, lists of womfiles, optional lists of womfiles, lists of optional womfiles
+      case womFile =>  
         // we can skip optional_localization files here, but that prevents checking in the call script for existence.
         //   => pass on all input files, check optional_localization during the actual localization. 
-        val arrays: Seq[WomArray] = womFile collectAsSeq { case womFile: WomFile  =>
-          val files: List[WomSingleFile] = DirectoryFunctions
-            .listWomSingleFiles(womFile, callPaths.workflowPaths)
-            .toTry(s"Error getting single files for $womFile")
-            .get
-          WomArray(WomArrayType(WomSingleFileType), files)
+        val arrays: Seq[WomArray] = womFile collectAsSeq { 
+          case womFile: WomFile =>
+            val files: List[WomSingleFile] = DirectoryFunctions
+              .listWomSingleFiles(womFile, callPaths.workflowPaths)
+              .toTry(s"Error getting single files for $womFile")
+              .get
+            WomArray(WomArrayType(WomSingleFileType), files)
+          case other => 
+            WomArray(WomArrayType(WomSingleFileType), List.empty)
         }
-        // mixed optional is cast to mandatory
-        val isOptional = areAllFilesOptional(womFile.womType)
-        // optional localization set ? 
-        val isLocOptional = inputsToNotLocalize.contains(womFile)
-          
+        // if files found: define optional statuses
+        val (isOptional, isLocOptional) = arrays.nonEmpty match {
+          case true =>
+            // mixed optional is cast to mandatory
+            val isOptional = areAllFilesOptional(womFile.womType)
+            val isLocOptional = isLocalizationOptional(womFile)
+            (isOptional, isLocOptional)
+          case false =>
+            (false, false)
+        }
+        
         // Flatten and collect files along with the outer womFile's optional status and localization requirement
         arrays.flatMap(_.value).collect { case file: WomFile =>
           (file, isOptional, isLocOptional)
         }
-      // non-file inputs are skipped
-      case _ => Seq.empty
+      
     }
-
     val callInputInputs = callInputFiles flatMap { case (name, filesWithOptional) =>
       val files = filesWithOptional.map(_._1)            // Extract the WomFiles
       val isOptional = filesWithOptional.map(_._2)         // Extract the corresponding optional status
