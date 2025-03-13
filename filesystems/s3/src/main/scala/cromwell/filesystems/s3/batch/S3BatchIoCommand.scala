@@ -39,6 +39,7 @@ import cromwell.core.io.{
   IoDeleteCommand,
   IoExistsCommand,
   IoExistsOrThrowCommand,
+  IoNoopCommand,
   IoHashCommand,
   IoSizeCommand,
   IoTouchCommand
@@ -46,6 +47,7 @@ import cromwell.core.io.{
 
 import cromwell.filesystems.s3.S3Path
 import java.nio.file.NoSuchFileException
+//import scala.util.{Try }
 
 /**
   * Io commands with S3 paths and some logic enabling batching of request.
@@ -162,3 +164,13 @@ case class S3BatchExistsOrThrowCommand(override val file: S3Path)
     }
   override def commandDescription: String = s"S3BatchExistsCommand file '$file'"
 }
+/**
+  * `IoCommand` that does nothing
+  * @param file the path to the object
+  */
+case class S3BatchNoopCommand(override val file: S3Path) extends IoNoopCommand(file) {
+  override def commandDescription: String = s"S3BatchNoopCommand file '$file'"
+}
+
+
+
