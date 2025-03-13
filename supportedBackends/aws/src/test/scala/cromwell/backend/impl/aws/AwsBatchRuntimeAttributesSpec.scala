@@ -78,6 +78,7 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
     false,
     false,
     sharedMemorySize = refineMV[Positive](64),
+    jobTimeout = refineMV[Positive](3600),
     "/Cromwell/job/",
     Map("tag1" -> "value1")
   )
@@ -531,6 +532,9 @@ class AwsBatchRuntimeAttributesSpec extends AnyWordSpecLike with CromwellTimeout
       ))
     }
 
+    // add tests for jobTimeout
+
+    
     "missing or invalid action key result in an invalid awsBatchEvaluateOnExit" in {
       val invalidEvaluateOnExit = List(
         // missing action key

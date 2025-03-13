@@ -106,11 +106,12 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
   val jobDescriptor: BackendJobDescriptor = BackendJobDescriptor(workFlowDescriptor, jobKey, null, Map.empty, null, null, null)
 
   val jobPaths: AwsBatchJobPaths = AwsBatchJobPaths(workflowPaths, jobKey) 
-  val s3Inputs: Set[AwsBatchInput] = Set(AwsBatchFileInput("foo", "s3://bucket/foo", DefaultPathBuilder.get("foo"), AwsBatchWorkingDisk()))
-  val s3Outputs: Set[AwsBatchFileOutput] = Set(AwsBatchFileOutput("baa", "s3://bucket/somewhere/baa", DefaultPathBuilder.get("baa"), AwsBatchWorkingDisk()))
+  val s3Inputs: Set[AwsBatchInput] = Set(AwsBatchFileInput("foo", "s3://bucket/foo", DefaultPathBuilder.get("foo"), AwsBatchWorkingDisk(),false))
+  val s3Outputs: Set[AwsBatchFileOutput] = Set(AwsBatchFileOutput("baa", "s3://bucket/somewhere/baa", DefaultPathBuilder.get("baa"), AwsBatchWorkingDisk(), false))
 
   val cpu: Int Refined Positive = 2
   val sharedMemorySize: MemorySize = "64 MB"
+  val jobTimeout: Int = 3600
 
   val runtimeAttributes: AwsBatchRuntimeAttributes = new AwsBatchRuntimeAttributes(
       cpu = cpu,
@@ -131,6 +132,7 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
       efsMakeMD5 = false,
       fileSystem = "s3",
       sharedMemorySize = sharedMemorySize,
+      jobTimeout = jobTimeout,
       logGroupName = "/aws/batch/job",
       additionalTags = Map("tag" -> "value")
   )
@@ -511,3 +513,5 @@ class AwsBatchJobSpec extends TestKitSuite with AnyFlatSpecLike with Matchers wi
     val expected = LinuxParameters.builder().sharedMemorySize(100).build()
     expected should equal(actual)
   }
+
+  // ADD TEST FOR jobTimout

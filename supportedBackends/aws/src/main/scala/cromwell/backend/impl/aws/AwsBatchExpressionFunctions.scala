@@ -42,7 +42,9 @@ import cromwell.backend.impl.aws.io._
 
 
 class AwsBatchExpressionFunctions(override val standardParams: StandardExpressionFunctionsParams)
-  extends StandardExpressionFunctions(standardParams) with AwsBatchGlobFunctions {
+  extends StandardExpressionFunctions(standardParams) 
+    with AwsBatchGlobFunctions 
+    with AwsReadLikeFunctions {
   
   override lazy val ioCommandBuilder: IoCommandBuilder = S3BatchCommandBuilder
 

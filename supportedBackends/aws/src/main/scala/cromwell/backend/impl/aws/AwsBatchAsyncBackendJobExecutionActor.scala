@@ -66,15 +66,27 @@ import cromwell.filesystems.s3.S3Path
 import cromwell.filesystems.s3.batch.S3BatchCommandBuilder
 
 import cromwell.services.keyvalue.KvClient
+import cromwell.services.metadata.CallMetadataKeys
+
 
 import org.slf4j.{Logger, LoggerFactory}
 import software.amazon.awssdk.services.batch.BatchClient
 import software.amazon.awssdk.services.batch.model._
 
 import wom.callable.Callable.OutputDefinition
+import wom.callable.MetaValueElement.{MetaValueElementBoolean, MetaValueElementObject}
+
 import wom.core.FullyQualifiedName
 import wom.expression.NoIoFunctionSet
-import wom.types.{WomArrayType, WomSingleFileType}
+import wom.types.{WomArrayType, 
+                  WomType, 
+                  WomSingleFileType,
+                  WomOptionalType,
+                  WomPrimitiveFileType,
+                  WomPrimitiveType,
+                  WomMapType,
+                  WomPairType,
+                  WomCompositeType}
 import wom.values._
 
 import scala.concurrent._
@@ -146,6 +158,29 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
 
   // |cd ${jobPaths.script.parent.pathWithoutScheme}; ls | grep -v script | xargs rm -rf; cd -
 
+  // overriden function : used in StandardAsyncExecutionActor
+  override def inputsToNotLocalize: Set[WomFile] = {
+      jobDescriptor.fullyQualifiedInputs.collect {
+        case (_, womFile: WomFile) if jobDescriptor.findInputFilesByParameterMeta {
+          case MetaValueElementObject(values) => 
+              values.get("localization_optional").contains(MetaValueElementBoolean(true))
+          case _ => false
+        }.contains(womFile) => womFile
+        
+      }.toSet
+    }
+  // custom routine that simply returns a boolean. Used here in callInputFiles
+  private def isLocalizationOptional: WomValue => Boolean = {
+    jobDescriptor.fullyQualifiedInputs.collect {
+        case (_, womFile: WomFile) if jobDescriptor.findInputFilesByParameterMeta {
+          case MetaValueElementObject(values) => 
+              values.get("localization_optional").contains(MetaValueElementBoolean(true))
+          case _ => false
+        }.contains(womFile) => womFile
+        
+      }.toSet
+  }
+
   private lazy val execScript =
     s"""|#!$jobShell
         |find ${jobPaths.script.parent.pathWithoutScheme} -group root | grep -v script | xargs rm -vrf
@@ -193,6 +228,7 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     case AWSBatchStorageSystems.s3 => commandScriptContents.toEither.toOption.get
     case _ => execScript
   }
+  
 
   lazy val batchJob: AwsBatchJob = {
     AwsBatchJob(
@@ -245,32 +281,64 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   /**
     * Takes two arrays of remote and local WOM File paths and generates the necessary AwsBatchInputs.
     */
+  
+  // taken from the WomExpression trait:
+  private def areAllFilesOptional(womType: WomType): Boolean = {
+    def innerAreAllFileTypesInWomTypeOptional(womType: WomType): Boolean = womType match {
+      case WomOptionalType(_: WomPrimitiveFileType) => 
+          true
+      case _: WomPrimitiveFileType => 
+          false
+      case _: WomPrimitiveType =>
+          true // WomPairTypes and WomCompositeTypes may have non-File components here which is fine.
+      case WomArrayType(inner) => innerAreAllFileTypesInWomTypeOptional(inner)
+      case WomMapType(_, inner) => innerAreAllFileTypesInWomTypeOptional(inner)
+      case WomPairType(leftType, rightType) =>
+        innerAreAllFileTypesInWomTypeOptional(leftType) && innerAreAllFileTypesInWomTypeOptional(rightType)
+      case WomCompositeType(typeMap, _) => typeMap.values.forall(innerAreAllFileTypesInWomTypeOptional)
+      case _ => false
+    }
+
+    // At the outermost level, primitives are never optional.
+    womType match {
+      case _: WomPrimitiveType => 
+          false
+      case _ => innerAreAllFileTypesInWomTypeOptional(womType)
+    }
+  }
+
   private def inputsFromWomFiles(
       namePrefix: String,
       remotePathArray: Seq[WomFile],
       localPathArray: Seq[WomFile],
-      jobDescriptor: BackendJobDescriptor,
-      flag: Boolean
+      isOptional: Seq[Boolean],  // can file be missing (File?)
+      isLocOptional: Seq[Boolean] // can localization be skipped (through meta tags)
   ): Iterable[AwsBatchInput] = {
 
-    (remotePathArray zip localPathArray zipWithIndex) flatMap {
-      case ((remotePath, localPath), index) =>
+    (remotePathArray zip localPathArray zip isOptional zip isLocOptional zipWithIndex) flatMap {
+      case ((((remotePath, localPath), optional), locOptional), index) =>
         var localPathString = localPath.valueString
-        if (localPathString.startsWith("s3://")) {
+        // not localizing : keep remote path
+        if (locOptional) {
+          localPathString = remotePath.valueString
+        // localizing : strip s3 prefixes
+        } else if (localPathString.startsWith("s3://")) {
           localPathString = localPathString.replace("s3://", "")
         } else if (localPathString.startsWith("s3:/")) {
           localPathString = localPathString.replace("s3:/", "")
         }
+        val localBuiltPath = DefaultPathBuilder.get(localPathString)
         Seq(
           AwsBatchFileInput(
             s"$namePrefix-$index",
             remotePath.valueString,
-            DefaultPathBuilder.get(localPathString),
-            workingDisk
+            localBuiltPath,
+            workingDisk,
+            optional,
+            locOptional
           )
         )
     }
-
   }
 
   /**
@@ -313,42 +381,65 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         name,
         files.map(_.file),
         files.map(localizationPath),
-        jobDescriptor,
-        false
+        Seq.fill(files.size)(false), // Add Seq() of false for each file (isOptional)
+        Seq.fill(files.size)(false) // Add Seq() of false for each file (locOptional)
       )
     }
 
-    // Collect all WomFiles from inputs to the call.
-    val callInputFiles: Map[FullyQualifiedName, Seq[WomFile]] = jobDescriptor.fullyQualifiedInputs safeMapValues {
-      womFile =>
-        val arrays: Seq[WomArray] = womFile collectAsSeq { case womFile: WomFile =>
-          val files: List[WomSingleFile] = DirectoryFunctions
-            .listWomSingleFiles(womFile, callPaths.workflowPaths)
-            .toTry(s"Error getting single files for $womFile")
-            .get
-          WomArray(WomArrayType(WomSingleFileType), files)
-        }
-
-        arrays.flatMap(_.value).collect { case womFile: WomFile =>
-          womFile
-        }
-    }
     
-    val callInputInputs = callInputFiles flatMap { case (name, files) =>
+    val callInputFiles: Map[FullyQualifiedName, Seq[(WomFile, Boolean, Boolean)]] = jobDescriptor.fullyQualifiedInputs safeMapValues {
+      // consider womfiles, optional womfiles, lists of womfiles, optional lists of womfiles, lists of optional womfiles
+      case womFile =>  
+        // we can skip optional_localization files here, but that prevents checking in the call script for existence.
+        //   => pass on all input files, check optional_localization during the actual localization. 
+        val arrays: Seq[WomArray] = womFile collectAsSeq { 
+          case womFile: WomFile =>
+            val files: List[WomSingleFile] = DirectoryFunctions
+              .listWomSingleFiles(womFile, callPaths.workflowPaths)
+              .toTry(s"Error getting single files for $womFile")
+              .get
+            WomArray(WomArrayType(WomSingleFileType), files)
+          case _ => 
+            WomArray(WomArrayType(WomSingleFileType), List.empty)
+        }
+        // if files found: define optional statuses
+        val (isOptional, isLocOptional) = arrays.nonEmpty match {
+          case true =>
+            // mixed optional is cast to mandatory
+            val isOptional = areAllFilesOptional(womFile.womType)
+            val isLocOptional = isLocalizationOptional(womFile)
+            (isOptional, isLocOptional)
+          case false =>
+            (false, false)
+        }
+        
+        // Flatten and collect files along with the outer womFile's optional status and localization requirement
+        arrays.flatMap(_.value).collect { case file: WomFile =>
+          (file, isOptional, isLocOptional)
+        }
+      
+    }
+    val callInputInputs = callInputFiles flatMap { case (name, filesWithOptional) =>
+      val files = filesWithOptional.map(_._1)            // Extract the WomFiles
+      val isOptional = filesWithOptional.map(_._2)         // Extract the corresponding optional status
+      val isLocOptional = filesWithOptional.map(_._3) // Extract the corresponding localization status
+
       inputsFromWomFiles(
         name,
         files,
         files.map(relativeLocalizationPath),
-        jobDescriptor,
-        true
+        isOptional,                                     // Pass optional status 
+        isLocOptional                                  // Pass localization requirement
       )
     }
-    // this is a list : AwsBatchInput(name_in_wf, origin_such_as_s3, target_in_docker_relative, target_in_docker_disk[name mount] )
+    // this is a list : AwsBatchInput(name_in_wf, origin_such_as_s3, target_in_docker_relative, target_in_docker_disk[name mount], is_optional_file )
     val scriptInput: AwsBatchInput = AwsBatchFileInput(
       "script",
       jobPaths.script.pathAsString,
       DefaultPathBuilder.get(jobPaths.script.pathWithoutScheme),
-      workingDisk
+      workingDisk,
+      false,
+      false
     )
 
     Set(scriptInput) ++ writeFunctionInputs ++ callInputInputs
@@ -397,7 +488,12 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
       jobDescriptor: BackendJobDescriptor
   ): Set[AwsBatchFileOutput] = {
     import cats.syntax.validated._
-    def evaluateFiles(output: OutputDefinition): List[WomFile] =
+
+
+    def evaluateFiles(output: OutputDefinition): List[(WomFile, Boolean)] = {
+      // mixed mandatory/optional types are cast to mandatory.
+      val is_optional = areAllFilesOptional(output.womType)
+
       Try(
         output.expression
           .evaluateFiles(
@@ -405,20 +501,33 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
             NoIoFunctionSet,
             output.womType
           )
-          .map(_.toList map { _.file })
-      ).getOrElse(List.empty[WomFile].validNel)
+          .map(_.toList map { womFile => 
+            // Pair each WomFile with the optional status
+            (womFile.file, is_optional) 
+          })
+      ).getOrElse(List.empty[(WomFile, Boolean)].validNel)
        .getOrElse(List.empty)
+    }
     
-    val womFileOutputs = jobDescriptor.taskCall.callable.outputs
-      .flatMap(evaluateFiles) map relativeLocalizationPath
-    val outputs: Seq[AwsBatchFileOutput] = womFileOutputs.distinct flatMap {
-      _.flattenFiles flatMap {
-        case unlistedDirectory: WomUnlistedDirectory =>
-          generateUnlistedDirectoryOutputs(unlistedDirectory)
-        case singleFile: WomSingleFile =>
-          generateAwsBatchSingleFileOutputs(singleFile)
-        case globFile: WomGlobFile => generateAwsBatchGlobFileOutputs(globFile)
-      }
+    val womFileOutputsEvaluated = jobDescriptor.taskCall.callable.outputs
+      .flatMap(evaluateFiles)  
+
+    val womFileOutputs = womFileOutputsEvaluated map { case (file, isOptional) => 
+      (relativeLocalizationPath(file), isOptional)
+    }
+
+    val flatmapped = womFileOutputs.distinct flatMap {
+      case (file, isOptional) => file.flattenFiles.map((_, isOptional))
+    }
+    // Generate AwsBatchFileOutput for each file based on type
+    val outputs: Seq[AwsBatchFileOutput] = flatmapped flatMap {
+      
+      case (unlistedDirectory: WomUnlistedDirectory, _) =>
+        generateUnlistedDirectoryOutputs(unlistedDirectory)
+      case (singleFile: WomSingleFile, isOptional) =>
+        generateAwsBatchSingleFileOutputs(singleFile, isOptional)
+      case (globFile: WomGlobFile, _) => 
+        generateAwsBatchGlobFileOutputs(globFile)
     }
 
     val additionalGlobOutput =
@@ -445,21 +554,23 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         makeSafeAwsBatchReferenceName(directoryListFile),
         listDestinationPath,
         DefaultPathBuilder.get(directoryListFile),
-        directoryDisk
+        directoryDisk,
+        false
       ),
       // The collection list file:
       AwsBatchFileOutput(
         makeSafeAwsBatchReferenceName(directoryPath),
         dirDestinationPath,
         DefaultPathBuilder.get(directoryPath + "*"),
-        directoryDisk
+        directoryDisk,
+        false
       )
     )
   }
 
   // used by generateAwsBatchOutputs, could potentially move this def within that function
   private def generateAwsBatchSingleFileOutputs(
-      womFile: WomSingleFile
+      womFile: WomSingleFile, isOptional: Boolean
   ): List[AwsBatchFileOutput] = {
     // rewrite this to create more flexibility
     val destination = configuration.fileSystem match {
@@ -477,11 +588,11 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     val output = if (configuration.efsMntPoint.isDefined &&
                      configuration.efsMntPoint.getOrElse("").equals(disk.toString.split(" ")(1)) &&
                      ! runtimeAttributes.efsDelocalize) {
-            // name: String, s3key: String, local: Path, mount: AwsBatchVolume
-            AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), womFile.value, relpath, disk)
+            // name: String, s3key: String, local: Path, mount: AwsBatchVolume, optionalFile
+            AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), womFile.value, relpath, disk, isOptional)
         } else {
             // if efs is not enabled, OR efs delocalization IS enabled, keep the s3 path as destination.
-            AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), URLDecoder.decode(destination,"UTF-8"), relpath, disk)
+            AwsBatchFileOutput(makeSafeAwsBatchReferenceName(womFile.value), URLDecoder.decode(destination,"UTF-8"), relpath, disk, isOptional)
         }
     List(output)
   }
@@ -496,9 +607,16 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     // add workflow id to hash for better conflict prevention
     val wfid = standardParams.jobDescriptor.toString.split(":")(0)
     val globName = GlobFunctions.globName(s"${womFile.value}-${wfid}")
-    var globbedDirPath = Paths.get(womFile.value).getParent()
+    
+    var globbedDirPath = Paths.get(womFile.value).getParent() match {
+      case null => Paths.get(".")
+      case parent => parent
+    }
     while (globbedDirPath.toString().contains("*")) {
-      globbedDirPath = globbedDirPath.getParent()
+      globbedDirPath = globbedDirPath.getParent() match {
+        case null => Paths.get(".")
+        case parent => parent
+      }
     }
     val globbedDir: String = globbedDirPath.toString()
     // generalize folder and list file
@@ -522,15 +640,16 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         // cannot resolve absolute paths : strip the leading '/'
         (
           callRootPath
-            .resolve(globDirectory.toString.stripPrefix("/"))
+            // first strip './' (glob in working dir), then '/' (relative path)
+            .resolve(globDirectory.toString.stripPrefix("./").stripPrefix("/"))
             .pathAsString,
           callRootPath
-            .resolve(globListFile.toString.stripPrefix("/"))
+            .resolve(globListFile.toString.stripPrefix("./").stripPrefix("/"))
             .pathAsString
         )
       }
     // return results
-    return (
+    (
         globName,
         globbedDir,
         globDirectoryDisk,
@@ -542,16 +661,16 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
 
   // used by generateAwsBatchOutputs, could potentially move this def within that function
   private def generateAwsBatchGlobFileOutputs(womFile: WomGlobFile): List[AwsBatchFileOutput] = {
-
+    
     val (globName, globbedDir, globDirectoryDisk, globDirectoryDestinationPath, globListFileDestinationPath) = generateGlobPaths(womFile)
     val (relpathDir,_) = relativePathAndVolume(DefaultPathBuilder.get(globbedDir + "/." + globName + "/" + "*").toString,runtimeAttributes.disks)
     val (relpathList,_) = relativePathAndVolume(DefaultPathBuilder.get(globbedDir + "/." + globName + ".list").toString,runtimeAttributes.disks)
     // We need both the glob directory and the glob list:
     List(
       // The glob directory:
-      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + "/" + "*").toString,globDirectoryDestinationPath, relpathDir, globDirectoryDisk),
+      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + "/" + "*").toString,globDirectoryDestinationPath, relpathDir, globDirectoryDisk, false),
       // The glob list file:
-      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + ".list").toString, globListFileDestinationPath, relpathList, globDirectoryDisk)
+      AwsBatchFileOutput(DefaultPathBuilder.get(globbedDir.toString + "/." + globName + ".list").toString, globListFileDestinationPath, relpathList, globDirectoryDisk, false)
       // TODO: EVALUATE above vs below  (mainly the makeSafeAwsBatchReferenceName() routine)
       // The glob directory:
       // AwsBatchFileOutput(makeSafeAwsBatchReferenceName(globDirectory),
@@ -572,15 +691,6 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
     case AWSBatchStorageSystems.s3 => AwsBatchWorkingDisk.MountPoint
     case _ => jobPaths.callExecutionRoot
   }
-
-  // comment this, as it doesn't provide any data.
-  //  (original) def scriptPreamble: ErrorOr[ScriptPreambleData] = ScriptPreambleData("").valid
-  // override def scriptPreamble: String = {
-  //   configuration.fileSystem match {
-  //     case  AWSBatchStorageSystems.s3 => ""
-  //     case _ => ""
-  //   }
-  // }
 
   override def scriptClosure: String = {
     configuration.fileSystem match {
@@ -877,44 +987,52 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
        Log.info(s"No attempts were made for job '${job.jobId}'. no memory-related retry needed.")
        false
      }
-     var containerRC =
-         try {
-             lastattempt.container.exitCode
-         } catch {
-             case _ : Throwable => null
-         }
-     // if missing, set to failed.
-     if (containerRC == null ) {
-         Log.debug(s"No RC found for job '${job.jobId}', most likely a spot kill")
-         containerRC = 1
-     }
-     // if not zero => get reason, else set retry to false.
-     containerRC.toString() match {
-       case "0" =>
-           Log.debug("container exit code was zero. job succeeded")
-           false
-       case "137" => 
-           Log.info("Job failed with Container status reason : 'OutOfMemory' (code:137)")
-           true
-       case _ => 
-           // failed job due to command errors (~ user errors) don't have a container exit reason.
-           val containerStatusReason:String = {
-              var lastReason =  lastattempt.container.reason
-              // cast null to empty-string to prevent nullpointer exception.
-              if (lastReason == null || lastReason.isEmpty) {
-                  lastReason = ""
-                  log.debug("No exit reason found for container.")
-              } else {
-                  Log.warn(s"Job failed with Container status reason : '${lastReason}'")
+     else {
+        var containerRC =
+            try {
+                lastattempt.container.exitCode
+            } catch {
+                case _ : Throwable => null
+            }
+        // if missing, set to failed.
+        if (containerRC == null ) {
+            Log.debug(s"No RC found for job '${job.jobId}', most likely a spot kill")
+            containerRC = 1
+        }
+        // if not zero => get reason, else set retry to false.
+        containerRC.toString() match {
+          case "0" =>
+              Log.debug("container exit code was zero. job succeeded")
+              false
+          case "137" => 
+              Log.info("Job failed with Container status reason : 'OutOfMemory' (code:137)")
+              true
+          case _ => 
+              // failed job due to command errors (~ user errors) don't have a container exit reason.
+              val containerStatusReason:String = {
+                 // if no attempts were made (rare) : container is null:
+                 var lastReason = try {
+                     lastattempt.container.reason
+                 } catch {
+                     case _ : Throwable => null
+                 }
+   
+                 // cast null to empty-string to prevent nullpointer exception.
+                 if (lastReason == null || lastReason.isEmpty) {
+                     lastReason = ""
+                     log.debug("No exit reason found for container.")
+                 } else {
+                     Log.warn(s"Job failed with Container status reason : '${lastReason}'")
+                 }
+                 lastReason
               }
-              lastReason
-           }
-           // check the list of OOM-keys against the exit reason.
-           val RetryMemoryKeys = memoryRetryErrorKeys.toList.flatten
-           val retry = RetryMemoryKeys.exists(containerStatusReason.contains)
-           Log.debug(s"Retry job based on provided keys : '${retry}'")
-           retry
-     }  
+              // check the list of OOM-keys against the exit reason.
+              val RetryMemoryKeys = memoryRetryErrorKeys.toList.flatten
+              val retry = RetryMemoryKeys.exists(containerStatusReason.contains)
+              Log.debug(s"Retry job based on provided keys : '${retry}'")
+              retry
+        }  
+     }
   }
 
   
@@ -927,12 +1045,22 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
   override lazy val startMetadataKeyValues: Map[String, Any] =
     super[AwsBatchJobCachingActorHelper].startMetadataKeyValues
 
-  // opportunity to send custom metadata when the run is in a terminal state, currently we don't
-  override def getTerminalMetadata(runStatus: RunStatus): Map[String, Any] =
+  // opportunity to send custom metadata when the run is in a terminal state, currently related to cloudwatch info
+  def getTerminalMetadata(runStatus: RunStatus, jobHandle: StandardAsyncPendingExecutionHandle): Map[String, Any] = {
+    // job details
+    val jobDetail = batchClient.describeJobs(DescribeJobsRequest.builder.jobs(jobHandle.pendingJob.jobId).build).jobs.get(0)
     runStatus match {
-      case _: TerminalRunStatus => Map()
+      case _: TerminalRunStatus =>
+        Map(
+          AwsBatchMetadataKeys.LogStreamName -> Option(jobDetail.container.logStreamName).getOrElse("unknown"),
+          AwsBatchMetadataKeys.LogGroupName -> Option(jobDetail.container.logConfiguration.options.get("awslogs-group")).getOrElse("unknown"),
+          //AwsBatchMetadataKeys.JobStatusReason -> Option(jobDetail.statusReason).getOrElse("unknown"),
+          // region is taken by splitting the ARN of the job queue (logging is always in same region I think)
+          AwsBatchMetadataKeys.LogStreamRegion -> Option(jobDetail.jobQueue.split(":")(3)).getOrElse("unknown"),
+        )
       case unknown => throw new RuntimeException(s"Attempt to get terminal metadata from non terminal status: $unknown")
     }
+  }
 
   def hostAbsoluteFilePath(jobPaths: JobPaths, pathString: String): Path = {
 
@@ -988,6 +1116,33 @@ class AwsBatchAsyncBackendJobExecutionActor(override val standardParams: Standar
         case _ => value
       }
     )
+  }
+
+
+ 
+  override def handlePollSuccess(oldHandle: StandardAsyncPendingExecutionHandle,
+                        state: StandardAsyncRunState
+  ): Future[ExecutionHandle] = {
+    val previousState = oldHandle.previousState
+    if (!(previousState exists statusEquivalentTo(state))) {
+      // If this is the first time checking the status, we log the transition as '-' to 'currentStatus'. Otherwise just use
+      // the state names.
+      // This logging and metadata publishing assumes that StandardAsyncRunState subtypes `toString` nicely to state names.
+      val prevStatusName = previousState.map(_.toString).getOrElse("-")
+      jobLogger.info(s"Status change from $prevStatusName to $state")
+      tellMetadata(Map(CallMetadataKeys.BackendStatus -> state))
+    }
+
+    state match {
+      case _ if isTerminal(state) =>
+        val metadata = getTerminalMetadata(state, oldHandle)
+        tellMetadata(metadata)
+        handleExecutionResult(state, oldHandle)
+      case s =>
+        Future.successful(
+          oldHandle.copy(previousState = Option(s))
+        ) // Copy the current handle with updated previous status.
+    }
   }
 
   override def handleExecutionSuccess(runStatus: StandardAsyncRunState,
