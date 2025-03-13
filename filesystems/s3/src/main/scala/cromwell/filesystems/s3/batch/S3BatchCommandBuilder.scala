@@ -37,7 +37,7 @@ import cromwell.filesystems.s3.S3Path
 import org.slf4j.{Logger, LoggerFactory}
 import cromwell.core.io.DefaultIoCommand.DefaultIoHashCommand
 
-import scala.util.Try
+import scala.util.{Try}
 
 /**
   * Generates commands for IO operations on S3
@@ -94,6 +94,11 @@ private case object PartialS3BatchCommandBuilder extends PartialIoCommandBuilder
   override def existsOrThrowCommand: PartialFunction[Path, Try[S3BatchExistsOrThrowCommand]] = { case path: S3Path =>
     Try(S3BatchExistsOrThrowCommand(path))
   }
+  
+  override def noopCommand: PartialFunction[Path, Try[S3BatchNoopCommand]] = { case path: S3Path =>
+    Try(S3BatchNoopCommand(path))
+  }
+ 
 }
 
 /**
