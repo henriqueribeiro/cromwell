@@ -1,4 +1,27 @@
-[![codecov](https://codecov.io/gh/broadinstitute/cromwell/branch/develop/graph/badge.svg)](https://codecov.io/gh/broadinstitute/cromwell)
+# 🎉 ARCHIVED - Contributions Merged Upstream!
+
+**This repository has been archived as of September 2025.**
+
+The work developed in this fork has been successfully merged into the main Cromwell codebase! 🚀
+
+**👉 Please use the official Cromwell repository: [broadinstitute/cromwell](https://github.com/broadinstitute/cromwell)**
+
+## What happened?
+
+After several years of maintaining this fork with features that were initially considered out of scope, the Cromwell core team has integrated these contributions into the upstream project:
+- [**Announcement**](https://github.com/henriqueribeiro/cromwell/issues/60)
+- [**Integration PR**](https://github.com/broadinstitute/cromwell/pull/7788)
+
+## For existing users
+
+- **New installations**: Use the official Cromwell repository
+- **Questions**: Please open issues in the main Cromwell repository
+
+## Thank you! 
+
+Special thanks to @geertvandeweyer and @markjschreiber, who were heavy contributors to this fork. Their dedication and expertise were instrumental in making these features robust and production-ready.
+
+---
 
 ## Welcome to the "AWS-friendly" Cromwell
 
